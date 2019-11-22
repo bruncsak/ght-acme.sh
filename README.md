@@ -64,8 +64,18 @@ server.pem and can be used with the server. Please note that the file only
 contains the signed server certificate and not the complete chain, which might
 be needed by some servers.
 
-## Renew a Certificates
+## Renew a Certificate
 
 This is done like the first signing request:
 
 `# ./letsencrypt.sh sign -a account.key -k server.key -c server.pem www.example.org www1.example.org example.org`
+
+## Revoke a Certificate
+
+This is done with the same account key the certificate was originally signed:
+
+`# ./letsencrypt.sh revoke -a account.key -c server.pem`
+
+Alternatively, it is possible to revoke the certificate with its server key:
+
+`# ./letsencrypt.sh revoke -k server.key -c server.pem`

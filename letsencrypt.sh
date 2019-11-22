@@ -206,8 +206,12 @@ handle_openssl_exit() {
     fi
 }
 
+fetch_http_status() {
+    HTTP_STATUS="$(sed -e '/^HTTP\// !d; s/^HTTP\/[0-9.]\{1,\}  *\([^ ]*\).*$/\1/' "$RESP_HEADER" | tail -n 1)"
+}
+
 check_http_status() {
-    egrep -s -q -e "^HTTP/[0-9.]+ $1 " "$RESP_HEADER"
+    [ "$HTTP_STATUS" = "$1" ]
 }
 
 unhandled_response() {
@@ -226,8 +230,9 @@ show_error() {
         echo "error while $1" > /dev/stderr
     fi
 
-    ERR_TYPE="`sed -e 's/.*"type":"\([^"]*\)".*/\1/' "$RESP_BODY"`"
-    ERR_DETAILS="`sed -e 's/.*"detail":"\([^"]*\)".*/\1/' "$RESP_BODY"`"
+    ERR_TYPE="`tr -d '\r\n' < "$RESP_BODY" | sed -e 's/.*"type": *"\([^"]*\)".*/\1/'`"
+    ERR_DETAILS="`tr -d '\r\n' < "$RESP_BODY" | sed -e 's/.*"detail": *"\([^"]*\)".*/\1/'`"
+
 
     echo "  $ERR_DETAILS ($ERR_TYPE)" > /dev/stderr
 }
@@ -309,6 +314,7 @@ send_req_no_kid(){
         wget -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$URI"
     fi
+    fetch_http_status
 
     if ! check_http_status 400; then
         return
@@ -341,6 +347,7 @@ send_get_req(){
         wget -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$GET_URI"
     fi
+    fetch_http_status
 }
 
 # account key handling
@@ -450,6 +457,7 @@ request_challenge(){
          DOMAIN_ORDERS="$DOMAIN_ORDERS"'{"type":"dns","value":"'"$DOMAIN"'"}'
     done
 
+    [ -n "$NEWORDERURL" ] || get_urls
     NEW_ORDER='{"identifiers":['"$DOMAIN_ORDERS"']}'
     send_req "$NEWORDERURL" "$NEW_ORDER"
     if check_http_status 201; then
@@ -653,7 +661,7 @@ gen_csr_with_private_key() {
     openssl req -new -sha512 -key "$SERVER_KEY" -subj / -reqexts SAN -config $OPENSSL_CONFIG \
         > "$TMP_SERVER_CSR" \
         2> "$OPENSSL_ERR"
-    handle_openssl_exit $? "creating certifacte request"
+    handle_openssl_exit $? "creating certificate request"
 }
 
 csr_extract_domains() {
@@ -662,17 +670,26 @@ csr_extract_domains() {
     openssl req -in "$TMP_SERVER_CSR" -noout -text \
         > "$OPENSSL_OUT" \
         2> "$OPENSSL_ERR"
-    handle_openssl_exit $? "reading certifacte signing request"
+    handle_openssl_exit $? "reading certificate signing request"
 
     DOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
-    # echo "$DOMAINS"; exit
     if [ -z "$DOMAINS" ]; then
         DOMAINS="`sed -n '/Subject:/ {s/^.*CN=//; s/,*[	 ]*$//; p}' "$OPENSSL_OUT"`"
     fi
 }
 
-gen_csr() {
-    gen_csr_with_private_key
+certificate_extract_domains() {
+    log "extract domains from certificate"
+
+    openssl x509 -in "$SERVER_CERT" -noout -text \
+        > "$OPENSSL_OUT" \
+        2> "$OPENSSL_ERR"
+    handle_openssl_exit $? "reading certificate"
+
+    DOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
+    if [ -z "$DOMAINS" ]; then
+        DOMAINS="`sed -n '/Subject:/ {s/^.*CN=//; s/,*[	 ]*$//; p}' "$OPENSSL_OUT"`"
+    fi
 }
 
 request_certificate(){
@@ -721,11 +738,51 @@ request_certificate(){
     fi
 }
 
+revoke_certificate(){
+    log revoke certificate
+
+    [ -n "$REVOKECERTURL" ] || get_urls
+    OLD_CERT="$(
+            sed -e 's/-----BEGIN CERTIFICATE-----/{"certificate":"/; s/-----END CERTIFICATE-----/"}/;s/+/-/g;s!/!_!g;s/=//g' \
+                "$SERVER_CERT" \
+            | tr -d '\r\n' \
+    )"
+    if [ "$ACCOUNT_KEY" = "$SERVER_KEY" ] ;then
+        send_req_no_kid "$REVOKECERTURL" "$OLD_CERT"
+        if check_http_status 400; then
+            show_error "revoking certificate via server key"
+            exit 1
+        elif check_http_status 200; then
+            log certificate is revoked via server key
+            exit 0
+        else
+            unhandled_response "revoking certificate"
+        fi
+    else
+        send_req "$REVOKECERTURL" "$OLD_CERT"
+        if check_http_status 403; then
+            if fgrep -q 'urn:ietf:params:acme:error:unauthorized' "$RESP_BODY" ; then
+                return 1
+            else
+                unhandled_response "revoking certificate"
+            fi
+        elif check_http_status 400; then
+            show_error "revoking certificate via account key"
+            exit 1
+        elif check_http_status 200; then
+            log certificate is revoked via account key
+        else
+            unhandled_response "revoking certificate"
+        fi
+    fi
+}
+
 usage() {
     cat << 'EOT'
 letsencrypt.sh register [-4|-6] [-p] -a account_key -e email
 letsencrypt.sh delete [-4|-6] -a account_key
 letsencrypt.sh thumbprint -a account_key
+letsencrypt.sh revoke [-4|-6] {-a account_key|-k server_key} -c signed_crt
 letsencrypt.sh sign [-4|-6] -a account_key -k server_key -c signed_crt domain ...
 letsencrypt.sh sign [-4|-6] -a account_key -r server_csr -c signed_crt
 
@@ -735,7 +792,7 @@ letsencrypt.sh sign [-4|-6] -a account_key -r server_csr -c signed_crt
     -k server_key     the private key of the server certificate
     -r server_csr     a certificate signing request, which includes the
                       domains, use e.g. gen-csr.sh to create one
-    -c signed_crt     the location where to store the signed certificate
+    -c signed_crt     the location where to store the signed certificate or retrieve for revocation
     -l challenge_type can be dns-01 or http-01 (default)
     -q                quiet operation
     -4                the connection to the server should use IPv4
@@ -785,6 +842,21 @@ case "$ACTION" in
             h) usage; exit 1;;
             q) QUIET=1;;
             a) ACCOUNT_KEY="$OPTARG";;
+            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+        esac; done;;
+    revoke)
+        while getopts :hq46Ca:k:c:w:P:l: name; do case "$name" in
+            h) usage; exit 1;;
+            q) QUIET=1;;
+            4) IPV_OPTION="-4";;
+            6) IPV_OPTION="-6";;
+            C) PUSH_TOKEN_COMMIT=1;;
+            a) ACCOUNT_KEY="$OPTARG";;
+            k) SERVER_KEY="$OPTARG";;
+            c) SERVER_CERT="$OPTARG";;
+            w) WEBDIR="$OPTARG";;
+            P) PUSH_TOKEN="$OPTARG";;
+            l) CHALLENGE_TYPE="$OPTARG";;
             ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
         esac; done;;
     sign)
@@ -855,6 +927,14 @@ case "$ACTION" in
         printf "account thumbprint: %s\n" "$ACCOUNT_THUMB"
         exit 0;;
 
+    revoke)
+        [ -n "$SERVER_CERT" ] || die "no certificate file given to revoke"
+        [ -z "$ACCOUNT_KEY" -a -z "$SERVER_KEY" ] && echo "either account key or server key must be given" > /dev/stderr && exit 1
+        [ -n "$ACCOUNT_KEY" ] || { log "using server key as account key" ; ACCOUNT_KEY="$SERVER_KEY" ; }
+        load_account_key
+        revoke_certificate && exit 0
+        certificate_extract_domains;;
+
     sign) die "neither server key nor server csr given" 1 ;;
 
     sign-key)
@@ -889,11 +969,14 @@ while [ "$#" -gt 0 ]; do
 done
 DOMAINS="`printf "%s" "$DOMAINS" | tr A-Z a-z`"
 
-[ "$ACTION" != "sign-csr" ] && gen_csr
+[ "$ACTION" = "sign-key" ] && gen_csr_with_private_key
 
-get_urls
 request_challenge
 push_response
 request_verification
 check_verification
-request_certificate
+if [ "$ACTION" = "revoke" ] ;then
+  revoke_certificate
+else
+  request_certificate
+fi
