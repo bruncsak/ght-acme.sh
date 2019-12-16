@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2019-12-13"
+VERSION_DATE="2019-12-16"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -141,7 +141,7 @@ validate_domain() {
         return 1
     fi
 
-    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^\(\*\.\)\{0,1\}\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\{0,1\}\.\)\{1,\}[a-zA-Z]\{2,63\}$/_/;'`"
+    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^'"$DOMAIN_EXTRA_PAT"'\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\{0,1\}\.\)\{1,\}[a-zA-Z]\{2,63\}$/_/;'`"
 
     if [ "$DOMAIN_OUT" = _ ]; then
         return 0
@@ -509,8 +509,7 @@ push_domain_response() {
     elif [ "$CHALLENGE_TYPE" = "dns-01" ]; then
         domain_dns_challenge "add"
     else
-        # May be tls-sni-02?
-        echo "unsupported challenge type for install (but in progress): $CHALLENGE_TYPE" > /dev/stderr; exit 1
+        echo "unsupported challenge type for install token: $CHALLENGE_TYPE" > /dev/stderr; exit 1
     fi
 
     return
@@ -532,8 +531,7 @@ remove_domain_response() {
     elif [ "$CHALLENGE_TYPE" = "dns-01" ]; then
         domain_dns_challenge "delete"
     else
-        # May be tls-sni-02?
-        echo "unsupported challenge type for remove (but in progress): $CHALLENGE_TYPE" > /dev/stderr; exit 1
+        echo "unsupported challenge type for remove token: $CHALLENGE_TYPE" > /dev/stderr; exit 1
     fi
 
     return
@@ -900,10 +898,15 @@ esac
 shift $(($OPTIND - 1))
 
 case "$CHALLENGE_TYPE" in
-  http-01) ;;
-  dns-01)  ;;
-  tls-sni-02)  ;;
-  *) echo "unsupported challenge type: $CHALLENGE_TYPE" > /dev/stderr; exit 1;;
+  http-01)
+    DOMAIN_EXTRA_PAT=''
+    ;;
+  dns-01)
+    DOMAIN_EXTRA_PAT='\(\*\.\)\{0,1\}'
+    ;;
+  *)
+    echo "unsupported challenge type: $CHALLENGE_TYPE" > /dev/stderr; exit 1
+    ;;
 esac
 
 case "$ACTION" in
