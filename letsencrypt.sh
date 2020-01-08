@@ -19,7 +19,7 @@
 
 # temporary files to store input/output of curl or openssl
 
-trap 'rm -f "$RESP_HEABOD $WGET_OUT $RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 2 3 9 11 13 15
+trap 'rm -f "$RESP_HEABOD" "$WGET_OUT" "$RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 2 3 9 11 13 15
 
 # file to store header and body of http response
 RESP_HEABOD="`mktemp -t le.$$.resp-heabod.XXXXXX`"
@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2019-12-16"
+VERSION_DATE="2020-01-08"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -386,7 +386,11 @@ get_urls(){
 register_account_key(){
 
     [ -n "$NEWACCOUNTURL" ] || get_urls
-    NEW_REG='{"termsOfServiceAgreed":true,"contact":["mailto:'"$ACCOUNT_EMAIL"'"]}'
+    if [ -n "$ACCOUNT_EMAIL" ] ;then
+      NEW_REG='{"termsOfServiceAgreed":true,"contact":["mailto:'"$ACCOUNT_EMAIL"'"]}'
+    else
+      NEW_REG='{"onlyReturnExisting":true}'
+    fi
     send_req_no_kid "$NEWACCOUNTURL" "$NEW_REG"
 
     if check_http_status 200; then
@@ -601,7 +605,7 @@ check_verification() {
             send_req "$DOMAIN_AUTHZ" ""
         
             if check_http_status 200; then
-                DOMAIN_STATUS="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'","status":"\([^"]*\)".*/\1/')"
+                DOMAIN_STATUS="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'",.*"status":"\([^"]*\)".*/\1/')"
                 case "$DOMAIN_STATUS" in
                     valid)
                         log $DOMAIN is valid
@@ -729,8 +733,10 @@ request_certificate(){
     log request certificate
     send_req "$CERTIFICATE" ""
     if check_http_status 200; then
-        sed -e '/^$/,$d' "$RESP_BODY" > "$SERVER_CERT"
-        sed -e '1,/^$/d' "$RESP_BODY" > "$SERVER_CERT"_chain
+        tr -d '\r' < "$RESP_BODY" |
+        sed -e '1,/^-----END CERTIFICATE-----$/ !d' | sed -e '/^$/d' > "$SERVER_CERT"
+        tr -d '\r' < "$RESP_BODY" |
+        sed -e '1,/^-----END CERTIFICATE-----$/d'   | sed -e '/^$/d' > "$SERVER_CERT"_chain
     else
         unhandled_response "retrieveing certificate"
     fi
@@ -777,12 +783,12 @@ revoke_certificate(){
 
 usage() {
     cat << 'EOT'
-letsencrypt.sh register [-4|-6] [-p] -a account_key -e email
-letsencrypt.sh delete [-4|-6] -a account_key
+letsencrypt.sh register [-p] -a account_key -e email
+letsencrypt.sh delete -a account_key
 letsencrypt.sh thumbprint -a account_key
-letsencrypt.sh revoke [-4|-6] {-a account_key|-k server_key} -c signed_crt
-letsencrypt.sh sign [-4|-6] -a account_key -k server_key -c signed_crt domain ...
-letsencrypt.sh sign [-4|-6] -a account_key -r server_csr -c signed_crt
+letsencrypt.sh revoke {-a account_key|-k server_key} -c signed_crt
+letsencrypt.sh sign -a account_key -k server_key -c signed_crt domain ...
+letsencrypt.sh sign -a account_key -r server_csr -c signed_crt
 
     -a account_key    the private key
     -e email          the email address assigned to the account key during
@@ -790,13 +796,20 @@ letsencrypt.sh sign [-4|-6] -a account_key -r server_csr -c signed_crt
     -k server_key     the private key of the server certificate
     -r server_csr     a certificate signing request, which includes the
                       domains, use e.g. gen-csr.sh to create one
-    -c signed_crt     the location where to store the signed certificate or retrieve for revocation
-    -l challenge_type can be dns-01 or http-01 (default)
-    -q                quiet operation
+    -c signed_crt     the location where to store the signed certificate
+                      or retrieve for revocation
+
+  ACME server options:
+    -D URL            ACME server directory URL
     -4                the connection to the server should use IPv4
     -6                the connection to the server should use IPv6
 
-  sign:
+  generic flags:
+    -h                this help page
+    -q                quiet operation
+
+  revoke and sign:
+    -l challenge_type can be http-01 (default) or dns-01
     -w webdir         the directory, where the response should be stored
                       $DOMAIN will be replaced by the actual domain
                       the directory will not be created
@@ -816,18 +829,20 @@ SHOW_THUMBPRINT=0
 
 case "$ACTION" in
     delete)
-        while getopts :hq46a: name; do case "$name" in
+        while getopts :hqD:46a: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
+            D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
             a) ACCOUNT_KEY="$OPTARG";;
             ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
         esac; done;;
     register)
-        while getopts :hq46a:e:p name; do case "$name" in
+        while getopts :hqD:46a:e:p name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
+            D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
             p) SHOW_THUMBPRINT=1;;
@@ -843,9 +858,10 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
         esac; done;;
     revoke)
-        while getopts :hq46Ca:k:c:w:P:l: name; do case "$name" in
+        while getopts :hqD:46Ca:k:c:w:P:l: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
+            D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
             C) PUSH_TOKEN_COMMIT=1;;
@@ -858,9 +874,10 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
         esac; done;;
     sign)
-        while getopts :hq46Ca:k:r:c:w:P:l: name; do case "$name" in
+        while getopts :hqD:46Ca:k:r:c:w:P:l: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
+            D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
             C) PUSH_TOKEN_COMMIT=1;;
@@ -963,6 +980,19 @@ case "$ACTION" in
     *)
         die "invalid action: $ACTION" 1 ;;
 esac
+
+[ -n "$WEBDIR" ] && [ "$CHALLENGE_TYPE" = "dns-01" ] &&
+    die "webdir option and dns-01 challenge type are mutual exclusive" 1
+
+if [ "$CHALLENGE_TYPE" = "http-01" ] ;then
+    [ -n "$WEBDIR" ] && [ -n "$PUSH_TOKEN" ] &&
+        die "webdir option and command to install the token are mutual exclusive" 1
+    [ -z "$WEBDIR" ] && [ -z "$PUSH_TOKEN" ] &&
+        die "either webdir option or command to install the token must be specified" 1
+fi
+
+[ -z "$PUSH_TOKEN" ] && [ -n "$PUSH_TOKEN_COMMIT" ] &&
+    die "commit feature without command to install the token makes no sense" 1
 
 while [ "$#" -gt 0 ]; do
     DOMAIN="$1"
