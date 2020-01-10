@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-08"
+VERSION_DATE="2020-01-11"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -151,7 +151,7 @@ validate_domain() {
 }
 
 fetch_location() {
-sed -e '/^Location: / !d; s/Location: //' "$RESP_HEADER" | tr -d '\r\n'
+    header_field_value Location
 }
 
 handle_wget_exit() {
@@ -237,10 +237,14 @@ show_error() {
     echo "  $ERR_DETAILS ($ERR_TYPE)" > /dev/stderr
 }
 
+header_field_value() {
+    grep -i -e "^$1:" "$RESP_HEADER" | sed -e 's/^[^:]*: *//' | tr -d '\r\n'
+}
+
 # retrieve the nonce from the response header of the previous request for the forthcomming request
 
 extract_nonce() {
-    sed -e '/Replay-Nonce: / !d; s/^Replay-Nonce: //' "$RESP_HEADER" | tr -d '\r\n'
+    header_field_value Replay-Nonce
 }
 
 # generate the PROTECTED variable, which contains a nonce retrieved from the
