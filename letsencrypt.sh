@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-11"
+VERSION_DATE="2020-01-13"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -312,10 +312,10 @@ send_req_no_kid(){
     DATA='{"protected":"'"$PROTECTED"'","payload":"'"$PAYLOAD"'","signature":"'"$SIGNATURE"'"}'
 
     if [ "$USE_WGET" != yes ] ;then
-        curl -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
+        curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
         handle_curl_exit $? "$URI"
     else
-        wget -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
+        wget $WGETEXTRAFLAG -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$URI"
     fi
     fetch_http_status
@@ -345,10 +345,10 @@ send_get_req(){
     GET_URI="$1"
 
     if [ "$USE_WGET" != yes ] ;then
-        curl -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$GET_URI"
+        curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$GET_URI"
         handle_curl_exit $? "$GET_URI"
     else
-        wget -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
+        wget $WGETEXTRAFLAG -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$GET_URI"
     fi
     fetch_http_status
@@ -471,6 +471,7 @@ request_challenge(){
     if check_http_status 201; then
         DOMAIN_AUTHZ_LIST="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"authorizations":\[\([^]]*\)\].*$/\1/' | tr -d '"' | tr ',' ' ')"
         FINALIZE="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"finalize":"\([^"]*\).*$/\1/')"
+        CURRENT_ORDER="`fetch_location`"
     else
         unhandled_response "requesting new order for $DOMAINS"
     fi
@@ -706,8 +707,8 @@ request_certificate(){
                 "$TMP_SERVER_CSR" \
             | tr -d '\r\n' \
     )"
+    send_req "$FINALIZE" "$NEW_CERT"
     while : ;do
-        send_req "$FINALIZE" "$NEW_CERT"
     
         if check_http_status 200; then
             ORDER_STATUS="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"status":"\([^"]*\)".*/\1/')"
@@ -720,6 +721,7 @@ request_certificate(){
                 processing)
                     echo order: "$ORDER_STATUS" > /dev/stderr
                     sleep 1
+                    send_req "$CURRENT_ORDER" ""
                     continue
                     ;;
                 invalid|pending|ready)
