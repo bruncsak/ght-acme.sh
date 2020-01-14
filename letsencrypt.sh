@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-13"
+VERSION_DATE="2020-01-14"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -124,14 +124,14 @@ base64url() {
 
 log() {
     if [ -z "$QUIET" ]; then
-        echo "$@" > /dev/stderr
+        echo "$@" >& 2
     fi
 }
 
 die() {
     RETCODE="$?"
     [ -n "$2" ] && RETCODE="$2"
-    [ -n "$1" ] && printf "%s\n" "$1" > /dev/stderr
+    [ -n "$1" ] && printf "%s\n" "$1" >& 2
     exit "$RETCODE"
 }
 
@@ -159,13 +159,13 @@ handle_wget_exit() {
     WGET_URI="$2"
 
     if [ "$WGET_EXIT" "!=" 0 -o -s "$WGET_OUT" ]; then
-        echo "error while making a web request to \"$WGET_URI\"" > /dev/stderr
-        echo "wget exit status: $WGET_EXIT" > /dev/stderr
+        echo "error while making a web request to \"$WGET_URI\"" >& 2
+        echo "wget exit status: $WGET_EXIT" >& 2
         case "$WGET_EXIT" in
         esac
 
-        cat "$WGET_OUT" > /dev/stderr
-        cat "$RESP_HEABOD" > /dev/stderr
+        cat "$WGET_OUT" >& 2
+        cat "$RESP_HEABOD" >& 2
 
         exit 1
     fi
@@ -179,15 +179,15 @@ handle_curl_exit() {
     CURL_URI="$2"
 
     if [ "$CURL_EXIT" "!=" 0 ]; then
-        echo "error while making a web request to \"$CURL_URI\"" > /dev/stderr
-        echo "curl exit status: $CURL_EXIT" > /dev/stderr
+        echo "error while making a web request to \"$CURL_URI\"" >& 2
+        echo "curl exit status: $CURL_EXIT" >& 2
         case "$CURL_EXIT" in
             # see man curl "EXIT CODES"
-             3) echo "  malformed URI" > /dev/stderr;;
-             6) echo "  could not resolve host" > /dev/stderr;;
-             7) echo "  failed to connect" > /dev/stderr;;
-            28) echo "  operation timeout" > /dev/stderr;;
-            35) echo "  SSL connect error" > /dev/stderr;;
+             3) echo "  malformed URI" >& 2;;
+             6) echo "  could not resolve host" >& 2;;
+             7) echo "  failed to connect" >& 2;;
+            28) echo "  operation timeout" >& 2;;
+            35) echo "  SSL connect error" >& 2;;
         esac
 
         exit 1
@@ -199,9 +199,9 @@ handle_openssl_exit() {
     OPENSSL_ACTION=$2
 
     if [ "$OPENSSL_EXIT" "!=" 0 ]; then
-        echo "error while $OPENSSL_ACTION" > /dev/stderr
-        echo "openssl exit status: $OPENSSL_EXIT" > /dev/stderr
-        cat "$OPENSSL_ERR" > /dev/stderr
+        echo "error while $OPENSSL_ACTION" >& 2
+        echo "openssl exit status: $OPENSSL_EXIT" >& 2
+        cat "$OPENSSL_ERR" >& 2
         exit 1
     fi
 }
@@ -215,26 +215,26 @@ check_http_status() {
 }
 
 unhandled_response() {
-    echo "unhandled response while $1" > /dev/stderr
-    echo > /dev/stderr
+    echo "unhandled response while $1" >& 2
+    echo >& 2
 
-    cat "$RESP_HEADER" "$RESP_BODY" > /dev/stderr
+    cat "$RESP_HEADER" "$RESP_BODY" >& 2
 
-    echo > /dev/stderr
+    echo >& 2
 
     exit 1
 }
 
 show_error() {
     if [ -n "$1" ]; then
-        echo "error while $1" > /dev/stderr
+        echo "error while $1" >& 2
     fi
 
     ERR_TYPE="`tr -d '\r\n' < "$RESP_BODY" | sed -e 's/.*"type": *"\([^"]*\)".*/\1/'`"
     ERR_DETAILS="`tr -d '\r\n' < "$RESP_BODY" | sed -e 's/.*"detail": *"\([^"]*\)".*/\1/'`"
 
 
-    echo "  $ERR_DETAILS ($ERR_TYPE)" > /dev/stderr
+    echo "  $ERR_DETAILS ($ERR_TYPE)" >& 2
 }
 
 header_field_value() {
@@ -253,7 +253,7 @@ extract_nonce() {
 gen_protected(){
     NONCE="`extract_nonce`"
     if [ -z "$NONCE" ]; then
-        # echo fetch new nonce > /dev/stderr
+        # echo fetch new nonce >& 2
         send_get_req "$NEWNONCEURL"
 
         NONCE="`extract_nonce`"
@@ -325,11 +325,11 @@ send_req_no_kid(){
     elif ! fgrep -q 'urn:ietf:params:acme:error:badNonce' "$RESP_BODY" ; then
         return
     fi
-    echo "badNonce error: other than extrem load on the boulder server," > /dev/stderr
-    echo "this is mostly due to multiple client egress IP addresses," > /dev/stderr
-    echo "including working IPv4 and IPv6 addresses on dual family systems." > /dev/stderr
-    echo "In that case as a workaround please try to restrict the egress" > /dev/stderr
-    echo "IP address with the -4 or -6 command line option on the script." > /dev/stderr
+    echo "badNonce error: other than extrem load on the boulder server," >& 2
+    echo "this is mostly due to multiple client egress IP addresses," >& 2
+    echo "including working IPv4 and IPv6 addresses on dual family systems." >& 2
+    echo "In that case as a workaround please try to restrict the egress" >& 2
+    echo "IP address with the -4 or -6 command line option on the script." >& 2
     exit 1
 }
 
@@ -399,7 +399,7 @@ register_account_key(){
 
     if check_http_status 200; then
         KID="`fetch_location`"
-        [ "$1" = "retrieve_kid" ] || echo "account already registered" > /dev/stderr
+        [ "$1" = "retrieve_kid" ] || echo "account already registered" >& 2
         return
     elif check_http_status 201; then
         KID="`fetch_location`"
@@ -518,7 +518,7 @@ push_domain_response() {
     elif [ "$CHALLENGE_TYPE" = "dns-01" ]; then
         domain_dns_challenge "add"
     else
-        echo "unsupported challenge type for install token: $CHALLENGE_TYPE" > /dev/stderr; exit 1
+        echo "unsupported challenge type for install token: $CHALLENGE_TYPE" >& 2; exit 1
     fi
 
     return
@@ -540,7 +540,7 @@ remove_domain_response() {
     elif [ "$CHALLENGE_TYPE" = "dns-01" ]; then
         domain_dns_challenge "delete"
     else
-        echo "unsupported challenge type for remove token: $CHALLENGE_TYPE" > /dev/stderr; exit 1
+        echo "unsupported challenge type for remove token: $CHALLENGE_TYPE" >& 2; exit 1
     fi
 
     return
@@ -617,7 +617,7 @@ check_verification() {
                         remove_domain_response
                         ;;
                     invalid)
-                        echo $DOMAIN: invalid > /dev/stderr
+                        echo $DOMAIN: invalid >& 2
                         show_error
                         remove_domain_response
 
@@ -719,13 +719,13 @@ request_certificate(){
                     break
                     ;;
                 processing)
-                    echo order: "$ORDER_STATUS" > /dev/stderr
+                    echo order: "$ORDER_STATUS" >& 2
                     sleep 1
                     send_req "$CURRENT_ORDER" ""
                     continue
                     ;;
                 invalid|pending|ready)
-                    echo order: "$ORDER_STATUS" > /dev/stderr
+                    echo order: "$ORDER_STATUS" >& 2
                     exit 1
                     ;;
                 *)
@@ -842,7 +842,7 @@ case "$ACTION" in
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
             a) ACCOUNT_KEY="$OPTARG";;
-            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     register)
         while getopts :hqD:46a:e:p name; do case "$name" in
@@ -854,14 +854,14 @@ case "$ACTION" in
             p) SHOW_THUMBPRINT=1;;
             a) ACCOUNT_KEY="$OPTARG";;
             e) ACCOUNT_EMAIL="$OPTARG";;
-            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     thumbprint)
         while getopts :hqa: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
             a) ACCOUNT_KEY="$OPTARG";;
-            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     revoke)
         while getopts :hqD:46Ca:k:c:w:P:l: name; do case "$name" in
@@ -877,7 +877,7 @@ case "$ACTION" in
             w) WEBDIR="$OPTARG";;
             P) PUSH_TOKEN="$OPTARG";;
             l) CHALLENGE_TYPE="$OPTARG";;
-            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     sign)
         while getopts :hqD:46Ca:k:r:c:w:P:l: name; do case "$name" in
@@ -890,7 +890,7 @@ case "$ACTION" in
             a) ACCOUNT_KEY="$OPTARG";;
             k)
                 if [ -n "$SERVER_CSR" ]; then
-                    echo "server key and server certificate signing request are mutual exclusive" > /dev/stderr
+                    echo "server key and server certificate signing request are mutual exclusive" >& 2
                     exit 1
                 fi
                 SERVER_KEY="$OPTARG"
@@ -898,7 +898,7 @@ case "$ACTION" in
                 ;;
             r)
                 if [ -n "$SERVER_KEY" ]; then
-                    echo "server key and server certificate signing request are mutual exclusive" > /dev/stderr
+                    echo "server key and server certificate signing request are mutual exclusive" >& 2
                     exit 1
                 fi
                 SERVER_CSR="$OPTARG"
@@ -908,7 +908,7 @@ case "$ACTION" in
             w) WEBDIR="$OPTARG";;
             P) PUSH_TOKEN="$OPTARG";;
             l) CHALLENGE_TYPE="$OPTARG";;
-            ?|:) echo "invalid arguments" > /dev/stderr; exit 1;;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     -h|--help|-?)
         usage
@@ -928,7 +928,7 @@ case "$CHALLENGE_TYPE" in
     DOMAIN_EXTRA_PAT='\(\*\.\)\{0,1\}'
     ;;
   *)
-    echo "unsupported challenge type: $CHALLENGE_TYPE" > /dev/stderr; exit 1
+    echo "unsupported challenge type: $CHALLENGE_TYPE" >& 2; exit 1
     ;;
 esac
 
@@ -942,7 +942,7 @@ case "$ACTION" in
 
     register)
         load_account_key
-        [ -z "$ACCOUNT_EMAIL" ] && echo "account email address not given" > /dev/stderr && exit 1
+        [ -z "$ACCOUNT_EMAIL" ] && echo "account email address not given" >& 2 && exit 1
         log "register account"
         register_account_key
         [ $SHOW_THUMBPRINT -eq 1 ] && printf "account thumbprint: %s\n" "$ACCOUNT_THUMB"
@@ -955,7 +955,7 @@ case "$ACTION" in
 
     revoke)
         [ -n "$SERVER_CERT" ] || die "no certificate file given to revoke"
-        [ -z "$ACCOUNT_KEY" -a -z "$SERVER_KEY" ] && echo "either account key or server key must be given" > /dev/stderr && exit 1
+        [ -z "$ACCOUNT_KEY" -a -z "$SERVER_KEY" ] && echo "either account key or server key must be given" >& 2 && exit 1
         [ -n "$ACCOUNT_KEY" ] || { log "using server key as account key" ; ACCOUNT_KEY="$SERVER_KEY" ; }
         load_account_key
         revoke_certificate && exit 0
