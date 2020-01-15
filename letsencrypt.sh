@@ -19,7 +19,7 @@
 
 # temporary files to store input/output of curl or openssl
 
-trap 'rm -f "$RESP_HEABOD" "$WGET_OUT" "$RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 2 3 9 11 13 15
+trap 'rm -f "$RESP_HEABOD" "$WGET_OUT" "$RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 1 2 3 13 15
 
 # file to store header and body of http response
 RESP_HEABOD="`mktemp -t le.$$.resp-heabod.XXXXXX`"
@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-14"
+VERSION_DATE="2020-01-15"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -272,7 +272,6 @@ gen_protected(){
 gen_signature() {
     printf "%s" "$PROTECTED.$PAYLOAD" > "$OPENSSL_IN"
     openssl dgst -sha256 -binary -sign "$ACCOUNT_KEY" < "$OPENSSL_IN" > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
-    # echo "$OPENSSL_OUT: " ; cat -t "$OPENSSL_OUT"
     handle_openssl_exit "$?" "signing request"
     SIGNATURE="`base64url < "$OPENSSL_OUT"`"
 }
