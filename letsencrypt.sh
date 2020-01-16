@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-15"
+VERSION_DATE="2020-01-16"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -158,16 +158,24 @@ handle_wget_exit() {
     WGET_EXIT="$1"
     WGET_URI="$2"
 
-    if [ "$WGET_EXIT" "!=" 0 -o -s "$WGET_OUT" ]; then
+    if [ "$WGET_EXIT" -ne 0 -a "$WGET_EXIT" -ne 8 -o -s "$WGET_OUT" ]; then
         echo "error while making a web request to \"$WGET_URI\"" >& 2
         echo "wget exit status: $WGET_EXIT" >& 2
         case "$WGET_EXIT" in
+            # see man wget "EXIT STATUS"
+             4) echo "  Network failure" >& 2;;
+             5) echo "  SSL verification failure" >& 2;;
+             8) echo "  Server issued an error response" >& 2;;
         esac
 
         cat "$WGET_OUT" >& 2
         cat "$RESP_HEABOD" >& 2
 
         exit 1
+    elif [ "$WGET_EXIT" -eq 8 -a ! -s "$RESP_HEABOD" ] ;then
+        echo "error while making a web request to \"$WGET_URI\"" >& 2
+        echo "wget exit status: $WGET_EXIT" >& 2
+        die "Server issued an error response and no error document returned and no --content-on-error flag available. Upgrade your wget or use curl instead."
     fi
 
     tr -d '\r' < "$RESP_HEABOD" | sed -e '/^$/,$d' > "$RESP_HEADER"
@@ -314,7 +322,7 @@ send_req_no_kid(){
         curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
         handle_curl_exit $? "$URI"
     else
-        wget $WGETEXTRAFLAG -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
+        wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$URI"
     fi
     fetch_http_status
@@ -347,7 +355,7 @@ send_get_req(){
         curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$GET_URI"
         handle_curl_exit $? "$GET_URI"
     else
-        wget $WGETEXTRAFLAG -q --retry-connrefused   $IPV_OPTION -U "$USER_AGENT" --save-headers  -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
+        wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
         handle_wget_exit $? "$GET_URI"
     fi
     fetch_http_status
@@ -367,23 +375,30 @@ load_account_key(){
     ACCOUNT_THUMB="`echo "$ACCOUNT_JWK" | tr -d '\r\n' | openssl dgst -sha256 -binary | base64url`"
 }
 
+get_one_url(){
+    if ! egrep -s -q -e '"'"$1"'"' "$RESP_BODY" ;then
+        cat "$RESP_BODY" >& 2
+        die "Cannot retrieve URL for $1 ACME protocol function from the directory $CADIR"
+    fi
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"'"$1"'":"\([^"]*\)".*/\1/'
+}
+
 get_urls(){
+    if [ "$USE_WGET" = yes ] ;then
+        WGETCOEFLAG='--content-on-error'
+        wget --help | egrep -s -q -e "$WGETCOEFLAG" || WGETCOEFLAG=''
+    fi
+
     send_get_req "$CADIR"
+    if ! check_http_status 200 ;then
+        unhandled_response "fetching directory URLs"
+    fi
 
-    egrep -s -q -e '"newNonce"' "$RESP_BODY" &&
-    NEWNONCEURL="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"newNonce":"\([^"]*\)".*/\1/')"
-
-    egrep -s -q -e '"newAccount"' "$RESP_BODY" &&
-    NEWACCOUNTURL="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"newAccount":"\([^"]*\)".*/\1/')"
-
-    egrep -s -q -e '"newOrder"' "$RESP_BODY" &&
-    NEWORDERURL="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"newOrder":"\([^"]*\)".*/\1/')"
-
-    egrep -s -q -e '"revokeCert"' "$RESP_BODY" &&
-    REVOKECERTURL="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"revokeCert":"\([^"]*\)".*/\1/')"
-
-    egrep -s -q -e '"keyChange"' "$RESP_BODY" &&
-    KEYCHANGEURL="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"keyChange":"\([^"]*\)".*/\1/')"
+    NEWACCOUNTURL="`get_one_url newAccount`"
+    REVOKECERTURL="`get_one_url revokeCert`"
+     KEYCHANGEURL="`get_one_url keyChange`"
+      NEWNONCEURL="`get_one_url newNonce`"
+      NEWORDERURL="`get_one_url newOrder`"
 }
 
 register_account_key(){
