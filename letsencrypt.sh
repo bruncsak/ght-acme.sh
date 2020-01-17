@@ -109,7 +109,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-16"
+VERSION_DATE="2020-01-17"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -215,7 +215,7 @@ handle_openssl_exit() {
 }
 
 fetch_http_status() {
-    HTTP_STATUS="$(sed -e '/^HTTP\// !d; s/^HTTP\/[0-9.]\{1,\}  *\([^ ]*\).*$/\1/' "$RESP_HEADER" | tail -n 1)"
+    HTTP_STATUS="`sed -e '/^HTTP\// !d; s/^HTTP\/[0-9.]\{1,\}  *\([^ ]*\).*$/\1/' "$RESP_HEADER" | tail -n 1`"
 }
 
 check_http_status() {
@@ -438,21 +438,43 @@ delete_account_key(){
     fi
 }
 
-# This function returns the certificate request in base64url encoding
-# arguments: domain ...
-#   key: the private key, which is used for the domains
-#   domain: a list of domains for which the certificate should be valid
+check_server_domain() {
+    SERVER_DOMAIN="$1"
+
+    set -- $DOMAINS
+
+    for REQ_DOMAIN do
+        if [ "$SERVER_DOMAIN" = "$REQ_DOMAIN" ] ;then
+            return
+        elif [ "*.$SERVER_DOMAIN" = "$REQ_DOMAIN" ] ;then
+            return
+        fi
+    done
+    die "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN"
+}
+
+authz_domain() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"status":"pending"/ !d; s/.*"identifier":{"type":"dns","value":"\([^"]*\)"}.*/\1/'
+}
+
+authz_domain_token() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*{\([^}]*"type":"'"$CHALLENGE_TYPE"'"[^}]*\)}.*/\1/; s/.*"token":"\([^"]*\)".*/\1/'
+}
+
+authz_domain_uri() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*{\([^}]*"type":"'"$CHALLENGE_TYPE"'"[^}]*\)}.*/\1/; s/.*"url":"\([^"]*\)".*/\1/'
+}
 
 request_challenge_domain(){
 
     send_req "$DOMAIN_AUTHZ" ""
 
     if check_http_status 200; then
-        DOMAIN="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"status":"pending"/ !d; s/.*"identifier":{"type":"dns","value":"\([^"]*\)"}.*/\1/')"
+        DOMAIN="`authz_domain`"
         if [ -n "$DOMAIN" ] ;then
-            DOMAIN_CHALLENGE="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"'"$CHALLENGE_TYPE"'"/ !d; s/.*{\([^}]*"type":"'"$CHALLENGE_TYPE"'"[^}]*\)}.*/\1/')"
-            DOMAIN_TOKEN="$(echo "$DOMAIN_CHALLENGE" | sed 's/.*"token":"\([^"]*\)".*/\1/')"
-            DOMAIN_URI="$(echo "$DOMAIN_CHALLENGE" | sed 's/.*"url":"\([^"]*\)".*/\1/')"
+            check_server_domain "$DOMAIN"
+            DOMAIN_TOKEN="`authz_domain_token`"
+            DOMAIN_URI="`authz_domain_uri`"
 
             DOMAIN_DATA="$DOMAIN_DATA $DOMAIN $DOMAIN_URI $DOMAIN_TOKEN $DOMAIN_AUTHZ"
             log "retrieve challenge for $DOMAIN"
@@ -470,6 +492,14 @@ request_challenge_domain(){
     fi
 }
 
+domain_authz_list() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"authorizations":\[\([^]]*\)\].*$/\1/' | tr -d '"' | tr ',' ' '
+}
+
+finalize() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"finalize":"\([^"]*\).*$/\1/'
+}
+
 request_challenge(){
     log "creating new order"
 
@@ -483,8 +513,8 @@ request_challenge(){
     NEW_ORDER='{"identifiers":['"$DOMAIN_ORDERS"']}'
     send_req "$NEWORDERURL" "$NEW_ORDER"
     if check_http_status 201; then
-        DOMAIN_AUTHZ_LIST="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"authorizations":\[\([^]]*\)\].*$/\1/' | tr -d '"' | tr ',' ' ')"
-        FINALIZE="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"finalize":"\([^"]*\).*$/\1/')"
+        DOMAIN_AUTHZ_LIST="`domain_authz_list`"
+        FINALIZE="`finalize`"
         CURRENT_ORDER="`fetch_location`"
     else
         unhandled_response "requesting new order for $DOMAINS"
@@ -602,6 +632,10 @@ request_verification() {
     done
 }
 
+domain_status() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'",.*"status":"\([^"]*\)".*/\1/'
+}
+
 check_verification() {
     ALL_VALID=true
     
@@ -624,7 +658,7 @@ check_verification() {
             send_req "$DOMAIN_AUTHZ" ""
         
             if check_http_status 200; then
-                DOMAIN_STATUS="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'",.*"status":"\([^"]*\)".*/\1/')"
+                DOMAIN_STATUS="`domain_status`"
                 case "$DOMAIN_STATUS" in
                     valid)
                         log $DOMAIN is valid
@@ -642,7 +676,7 @@ check_verification() {
                         DOMAIN_DATA="$DOMAIN_DATA $DOMAIN $DOMAIN_URI $DOMAIN_TOKEN $DOMAIN_AUTHZ"
                         ;;
                     *)
-                        unhandled_response "checking verification status of $DOMAIN"
+                        unhandled_response "checking verification status of $DOMAIN: $DOMAIN_STATUS"
                         ;;
                 esac
             else
@@ -665,9 +699,8 @@ gen_csr_with_private_key() {
     ALT_NAME="subjectAltName=DNS:$1"
     shift
 
-    while [ -n "$1" ]; do
-        ALT_NAME="$ALT_NAME,DNS:$1"
-        shift
+    for DOMAIN do
+        ALT_NAME="$ALT_NAME,DNS:$DOMAIN"
     done
 
     if [ -r /etc/ssl/openssl.cnf ]; then
@@ -713,23 +746,31 @@ certificate_extract_domains() {
     fi
 }
 
+new_cert() {
+    sed -e 's/-----BEGIN\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/{"csr":"/; s/-----END\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$TMP_SERVER_CSR" | tr -d '\r\n'
+}
+
+order_status() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"status":"\([^"]*\)".*/\1/'
+}
+
+certificate_url() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"certificate":"\([^"]*\)".*/\1/'
+}
+
 request_certificate(){
     log finalize order
 
-    NEW_CERT="$(
-            sed -e 's/-----BEGIN\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/{"csr":"/; s/-----END\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/"}/;s/+/-/g;s!/!_!g;s/=//g' \
-                "$TMP_SERVER_CSR" \
-            | tr -d '\r\n' \
-    )"
+    NEW_CERT="`new_cert`"
     send_req "$FINALIZE" "$NEW_CERT"
     while : ;do
     
         if check_http_status 200; then
-            ORDER_STATUS="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"status":"\([^"]*\)".*/\1/')"
+            ORDER_STATUS="`order_status`"
             case "$ORDER_STATUS" in
                 valid)
                     log order is valid
-                    CERTIFICATE="$(tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"certificate":"\([^"]*\)".*/\1/')"
+                    CERTIFICATE="`certificate_url`"
                     break
                     ;;
                 processing)
@@ -762,15 +803,15 @@ request_certificate(){
     fi
 }
 
+old_cert() {
+    sed -e 's/-----BEGIN CERTIFICATE-----/{"certificate":"/; s/-----END CERTIFICATE-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$SERVER_CERT" | tr -d '\r\n'
+}
+
 revoke_certificate(){
     log revoke certificate
 
     [ -n "$REVOKECERTURL" ] || get_urls
-    OLD_CERT="$(
-            sed -e 's/-----BEGIN CERTIFICATE-----/{"certificate":"/; s/-----END CERTIFICATE-----/"}/;s/+/-/g;s!/!_!g;s/=//g' \
-                "$SERVER_CERT" \
-            | tr -d '\r\n' \
-    )"
+    OLD_CERT="`old_cert`"
     if [ "$ACCOUNT_KEY" = "$SERVER_KEY" ] ;then
         send_req_no_kid "$REVOKECERTURL" "$OLD_CERT"
         if check_http_status 400; then
