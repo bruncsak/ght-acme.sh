@@ -38,6 +38,7 @@ OPENSSL_ERR="`mktemp -t le.$$.openssl.err.XXXXXX`"
 # file to store the CSR
 TMP_SERVER_CSR="`mktemp -t le.$$.server.csr.XXXXXX`"
 
+CADIR="https://api.test4.buypass.no/acme/directory"
 CADIR="https://acme-staging-v02.api.letsencrypt.org/directory"
 
 # Prefix the following line with "# letsencrypt-production-server #", to use
@@ -46,6 +47,7 @@ CADIR="https://acme-staging-v02.api.letsencrypt.org/directory"
 # again on commiting the file, add the filter to your git config by running
 #   git config filter.production-server.clean misc/filter-production-server
 
+CADIR="https://api.buypass.com/acme/directory"
 CADIR="https://acme-v02.api.letsencrypt.org/directory"
 
 # global variables:
@@ -109,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-17"
+VERSION_DATE="2020-01-20"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -825,7 +827,7 @@ revoke_certificate(){
         fi
     else
         send_req "$REVOKECERTURL" "$OLD_CERT"
-        if check_http_status 403; then
+        if check_http_status 403 || check_http_status 401; then
             if fgrep -q 'urn:ietf:params:acme:error:unauthorized' "$RESP_BODY" ; then
                 return 1
             else
