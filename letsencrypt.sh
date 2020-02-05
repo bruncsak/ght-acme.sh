@@ -111,12 +111,14 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-01-20"
+VERSION_DATE="2020-02-05"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
 
 QUIET=
+
+PROGNAME="`basename $0`"
 
 # utility functions
 
@@ -150,10 +152,6 @@ validate_domain() {
     else
         return 1
     fi
-}
-
-fetch_location() {
-    header_field_value Location
 }
 
 handle_wget_exit() {
@@ -248,7 +246,15 @@ show_error() {
 }
 
 header_field_value() {
-    grep -i -e "^$1:" "$RESP_HEADER" | sed -e 's/^[^:]*: *//' | tr -d '\r\n'
+    grep -i -e "^$1:.*$2" "$RESP_HEADER" | sed -e 's/^[^:]*: *//' | tr -d '\r\n'
+}
+
+fetch_next_link() {
+    header_field_value Link ';rel="next"' | sed -s 's/^.*<\(.*\)>.*$/\1/'
+}
+
+fetch_location() {
+    header_field_value Location
 }
 
 # retrieve the nonce from the response header of the previous request for the forthcomming request
@@ -403,6 +409,14 @@ get_urls(){
       NEWORDERURL="`get_one_url newOrder`"
 }
 
+orders_url() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"orders":"/ !d; s/.*"orders":"\([^"]*\)".*/\1/'
+}
+
+orders_list() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/^.*"orders":\[\([^]]*\)\].*$/\1/' | tr -d '"' | tr ',' ' '
+}
+
 register_account_key(){
 
     [ -n "$NEWACCOUNTURL" ] || get_urls
@@ -416,15 +430,64 @@ register_account_key(){
     if check_http_status 200; then
         KID="`fetch_location`"
         [ "$1" = "retrieve_kid" ] || echo "account already registered" >& 2
+        ORDERS_URL="`orders_url`"
         return
     elif check_http_status 201; then
         KID="`fetch_location`"
+        ORDERS_URL="`orders_url`"
         return
     elif check_http_status 409; then
         [ "$1" = "nodie" ] || die "account already exists"
     else
         unhandled_response "registering account"
     fi
+}
+
+clrpenda() {
+    ORDERS_LIST=""
+    while [ -n "$ORDERS_URL" ]; do
+        send_req "$ORDERS_URL" ""
+        if check_http_status 200; then
+            ORDERS_LIST="$ORDERS_LIST `orders_list`"
+        else
+            unhandled_response "retrieving orders list"
+        fi
+        ORDERS_URL="`fetch_next_link`"
+    done
+
+    DOMAIN_AUTHZ_LIST=""
+    set -- $ORDERS_LIST
+
+    for ORDER do
+        send_req "$ORDER" ""
+        if check_http_status 200; then
+            ORDER_STATUS="`order_status`"
+            if [ "$ORDER_STATUS" = pending ] ;then
+                DOMAIN_AUTHZ_LIST="$DOMAIN_AUTHZ_LIST `domain_authz_list`"
+            fi
+        else
+            unhandled_response "retrieving order"
+        fi
+    done
+
+    # All domain should have that challenge type, even wildcard one
+    CHALLENGE_TYPE=dns-01
+
+    set -- $DOMAIN_AUTHZ_LIST
+
+    for DOMAIN_AUTHZ do
+        send_req "$DOMAIN_AUTHZ" ""
+        if check_http_status 200; then
+            DOMAIN="`authz_domain`"
+            if [ -n "$DOMAIN" ] ;then
+                DOMAIN_URI="`authz_domain_uri`"
+                log "retrieve challenge for $DOMAIN"
+                request_domain_verification
+            fi
+        else
+            unhandled_response "retrieve challenge for URL: $DOMAIN_AUTHZ"
+        fi
+    done
 }
 
 delete_account_key(){
@@ -441,14 +504,16 @@ delete_account_key(){
 }
 
 check_server_domain() {
-    SERVER_DOMAIN="$1"
+    if [ "$2" = true ] ;then
+        SERVER_DOMAIN="*.$1"
+    else
+        SERVER_DOMAIN="$1"
+    fi
 
     set -- $DOMAINS
 
     for REQ_DOMAIN do
         if [ "$SERVER_DOMAIN" = "$REQ_DOMAIN" ] ;then
-            return
-        elif [ "*.$SERVER_DOMAIN" = "$REQ_DOMAIN" ] ;then
             return
         fi
     done
@@ -457,6 +522,10 @@ check_server_domain() {
 
 authz_domain() {
     tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"status":"pending"/ !d; s/.*"identifier":{"type":"dns","value":"\([^"]*\)"}.*/\1/'
+}
+
+wildcard_domain() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"wildcard":/ !d; s/^.*"wildcard":\([a-z]*\).*$/\1/'
 }
 
 authz_domain_token() {
@@ -474,7 +543,7 @@ request_challenge_domain(){
     if check_http_status 200; then
         DOMAIN="`authz_domain`"
         if [ -n "$DOMAIN" ] ;then
-            check_server_domain "$DOMAIN"
+            check_server_domain "$DOMAIN" "`wildcard_domain`"
             DOMAIN_TOKEN="`authz_domain_token`"
             DOMAIN_URI="`authz_domain_uri`"
 
@@ -845,13 +914,14 @@ revoke_certificate(){
 }
 
 usage() {
-    cat << 'EOT'
-letsencrypt.sh register [-p] -a account_key -e email
-letsencrypt.sh delete -a account_key
-letsencrypt.sh thumbprint -a account_key
-letsencrypt.sh revoke {-a account_key|-k server_key} -c signed_crt
-letsencrypt.sh sign -a account_key -k server_key -c signed_crt domain ...
-letsencrypt.sh sign -a account_key -r server_csr -c signed_crt
+    cat << EOT
+$PROGNAME register [-p] -a account_key -e email
+$PROGNAME delete -a account_key
+$PROGNAME clrpenda -a account_key
+$PROGNAME thumbprint -a account_key
+$PROGNAME revoke {-a account_key|-k server_key} -c signed_crt
+$PROGNAME sign -a account_key -k server_key -c signed_crt domain ...
+$PROGNAME sign -a account_key -r server_csr -c signed_crt
 
     -a account_key    the private key
     -e email          the email address assigned to the account key during
@@ -874,12 +944,13 @@ letsencrypt.sh sign -a account_key -r server_csr -c signed_crt
   revoke and sign:
     -l challenge_type can be http-01 (default) or dns-01
     -w webdir         the directory, where the response should be stored
-                      $DOMAIN will be replaced by the actual domain
+                      \$DOMAIN will be replaced by the actual domain
                       the directory will not be created
     -P exec           the command to call to install the token on a remote
                       server
     -C                the command to call to install the token on a remote
                       server needs the commit feature
+  clrpenda:           clear pending authorizations for the given account
 EOT
 }
 
@@ -891,6 +962,16 @@ shift
 SHOW_THUMBPRINT=0
 
 case "$ACTION" in
+    clrpenda)
+        while getopts :hqD:46a: name; do case "$name" in
+            h) usage; exit 1;;
+            q) QUIET=1;;
+            D) CADIR="$OPTARG";;
+            4) IPV_OPTION="-4";;
+            6) IPV_OPTION="-6";;
+            a) ACCOUNT_KEY="$OPTARG";;
+            ?|:) echo "invalid arguments" >& 2; exit 1;;
+        esac; done;;
     delete)
         while getopts :hqD:46a: name; do case "$name" in
             h) usage; exit 1;;
@@ -990,6 +1071,12 @@ case "$CHALLENGE_TYPE" in
 esac
 
 case "$ACTION" in
+    clrpenda)
+        load_account_key
+        register_account_key retrieve_kid
+        clrpenda
+        exit;;
+
     delete)
         load_account_key
         register_account_key nodie
