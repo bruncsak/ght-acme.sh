@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-02-22"
+VERSION_DATE="2020-02-23"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -124,27 +124,27 @@ PROGNAME="`basename $0`"
 
 echo 'x\040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
 
-OctalEscapeSequence() {
-tr '[A-F]' '[a-f]' "$@" |
+HexadecimalStringToOctalEscapeSequence() {
+tr '[A-F]' '[a-f]' "$@" | tr -d '\r\n' |
 sed -e 's/[^0-9a-f]//g; s/^\(\(..\)\{0,\}\).$/\1/;
-s/\([0-9a-f]\)\([0-9a-f]\)/\1X\2/g; s/$/\\c/;
-s/X0/X00/g; s/X1/X01/g; s/X2/X02/g; s/X3/X03/g;
-s/X4/X04/g; s/X5/X05/g; s/X6/X06/g; s/X7/X07/g;
-s/X8/X10/g; s/X9/X11/g; s/Xa/X12/g; s/Xb/X13/g;
-s/Xc/X14/g; s/Xd/X15/g; s/Xe/X16/g; s/Xf/X17/g;
-s/0X0/\\000/g; s/0X1/\\001/g; s/1X0/\\002/g; s/1X1/\\003/g;
-s/2X0/\\004/g; s/2X1/\\005/g; s/3X0/\\006/g; s/3X1/\\007/g;
-s/4X0/\\010/g; s/4X1/\\011/g; s/5X0/\\012/g; s/5X1/\\013/g;
-s/6X0/\\014/g; s/6X1/\\015/g; s/7X0/\\016/g; s/7X1/\\017/g;
-s/8X0/\\020/g; s/8X1/\\021/g; s/9X0/\\022/g; s/9X1/\\023/g;
-s/aX0/\\024/g; s/aX1/\\025/g; s/bX0/\\026/g; s/bX1/\\027/g;
-s/cX0/\\030/g; s/cX1/\\031/g; s/dX0/\\032/g; s/dX1/\\033/g;
-s/eX0/\\034/g; s/eX1/\\035/g; s/fX0/\\036/g; s/fX1/\\037/g;
+s/\([0-9a-f]\)\([0-9a-f]\)/\1_\2/g; s/$/\\c/;
+s/_0/o0/g; s/_1/o1/g; s/_2/o2/g; s/_3/o3/g;
+s/_4/o4/g; s/_5/o5/g; s/_6/o6/g; s/_7/o7/g;
+s/_8/i0/g; s/_9/i1/g; s/_a/i2/g; s/_b/i3/g;
+s/_c/i4/g; s/_d/i5/g; s/_e/i6/g; s/_f/i7/g;
+s/0o/\\000/g; s/0i/\\001/g; s/1o/\\002/g; s/1i/\\003/g;
+s/2o/\\004/g; s/2i/\\005/g; s/3o/\\006/g; s/3i/\\007/g;
+s/4o/\\010/g; s/4i/\\011/g; s/5o/\\012/g; s/5i/\\013/g;
+s/6o/\\014/g; s/6i/\\015/g; s/7o/\\016/g; s/7i/\\017/g;
+s/8o/\\020/g; s/8i/\\021/g; s/9o/\\022/g; s/9i/\\023/g;
+s/ao/\\024/g; s/ai/\\025/g; s/bo/\\026/g; s/bi/\\027/g;
+s/co/\\030/g; s/ci/\\031/g; s/do/\\032/g; s/di/\\033/g;
+s/eo/\\034/g; s/ei/\\035/g; s/fo/\\036/g; s/fi/\\037/g;
 '
 }
 
-hex2string() {
-echo $ECHOESCFLAG "`OctalEscapeSequence`"
+hex2bin() {
+echo $ECHOESCFLAG "`HexadecimalStringToOctalEscapeSequence`"
 }
 
 base64url() {
@@ -324,7 +324,7 @@ key_get_modulus(){
     handle_openssl_exit $? "extracting account key modulus"
 
     sed -e 's/^Modulus=//' < "$OPENSSL_OUT" \
-        | hex2string \
+        | hex2bin \
         | base64url
 }
 
@@ -334,7 +334,7 @@ key_get_exponent(){
 
     sed -e '/^publicExponent: / !d; s/^publicExponent: [0-9]* \{1,\}(\(.*\)).*$/\1/;s/^0x\([0-9a-fA-F]\)\(\([0-9a-fA-F][0-9a-fA-F]\)*\)$/0x0\1\2/;s/^0x\(\([0-9a-fA-F][0-9a-fA-F]\)*\)$/\1/' \
         < "$OPENSSL_OUT" \
-        | hex2string \
+        | hex2bin \
         | base64url
 }
 
