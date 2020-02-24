@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-02-23"
+VERSION_DATE="2020-02-24"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -729,7 +729,7 @@ request_verification() {
 }
 
 domain_status() {
-    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'",.*"status":"\([^"]*\)".*/\1/'
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"type":"'"$CHALLENGE_TYPE"'",[^{}]*"status":"\([^"]*\)".*/\1/'
 }
 
 check_verification() {
