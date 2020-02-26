@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-02-24"
+VERSION_DATE="2020-02-26"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -792,6 +792,8 @@ gen_csr_with_private_key() {
 
     set -- $DOMAINS
 
+    FIRST_DOM="$1"
+
     ALT_NAME="subjectAltName=DNS:$1"
     shift
 
@@ -808,7 +810,7 @@ gen_csr_with_private_key() {
     echo "$ALT_NAME" >> "$OPENSSL_CONFIG"
 
 
-    openssl req -new -sha512 -key "$SERVER_KEY" -subj / -reqexts SAN -config $OPENSSL_CONFIG \
+    openssl req -new -sha512 -key "$SERVER_KEY" -subj "/CN=$FIRST_DOM" -reqexts SAN -config $OPENSSL_CONFIG \
         > "$TMP_SERVER_CSR" \
         2> "$OPENSSL_ERR"
     handle_openssl_exit $? "creating certificate request"
