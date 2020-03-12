@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-02-26"
+VERSION_DATE="2020-03-12"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -819,14 +819,27 @@ gen_csr_with_private_key() {
 csr_extract_domains() {
     log "extract domains from certificate signing request"
 
+    if echo "$CADIR" | egrep -i -s -q -e '\.buypass\.(com|no)/' -e '\.letsencrypt\.org/' ;then
+        # Known RFC8555 compatibly ACME servers
+        RFC8555DIVERGENCE=no
+    else
+        # Typically pebble's case, see https://github.com/letsencrypt/pebble/issues/304
+        # There will be no fix for this in the pebble's implementation so it is better to put a workaround here
+        RFC8555DIVERGENCE=yes
+    fi
+
     openssl req -in "$TMP_SERVER_CSR" -noout -text \
         > "$OPENSSL_OUT" \
         2> "$OPENSSL_ERR"
     handle_openssl_exit $? "reading certificate signing request"
 
-    DOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
-    if [ -z "$DOMAINS" ]; then
-        DOMAINS="`sed -n '/Subject:/ {s/^.*CN=//; s/,*[	 ]*$//; p}' "$OPENSSL_OUT"`"
+    ALTDOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
+    SUBJDOMAIN="`sed -n '/Subject:/ {s/^.*CN=//; s/,*[	 ]*$//; p}' "$OPENSSL_OUT"`"
+
+    if [ "$RFC8555DIVERGENCE" = no ] ;then
+        DOMAINS="$SUBJDOMAIN $ALTDOMAINS"
+    else
+        DOMAINS="$ALTDOMAINS"
     fi
 }
 
