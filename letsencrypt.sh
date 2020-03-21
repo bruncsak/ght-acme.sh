@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-03-13"
+VERSION_DATE="2020-03-21"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -394,6 +394,41 @@ send_get_req(){
     fetch_http_status
 }
 
+pwncheck(){
+    send_get_req "https://v1.pwnedkeys.com/$1"
+    if check_http_status 404; then
+      log "pwnedkeys.com claims: $2 is not compromised"
+      return 0
+    elif check_http_status 200; then
+      log "pwnedkeys.com claims: $2 is compromised, fingerprint: $1"
+      return 1
+    fi
+    unhandled_response "pwncheck"
+}
+
+pkey_hex_digest(){
+    openssl dgst -sha256 -hex "$1" > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    handle_openssl_exit $? "public key DER hexdigest"
+    sed -e 's/^.*= *//' "$OPENSSL_OUT"
+}
+
+pwnedkey_req_check(){
+    openssl req -in "$1" -noout -pubkey > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    handle_openssl_exit $? "extracting request public key"
+    cp "$OPENSSL_OUT" "$OPENSSL_IN"
+    openssl rsa -in "$OPENSSL_IN" -pubin -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    handle_openssl_exit $? "public key to DER"
+    cp "$OPENSSL_OUT" "$OPENSSL_IN"
+    pwncheck "`pkey_hex_digest "$OPENSSL_IN"`" "$2"
+}
+
+pwnedkey_key_check(){
+    openssl rsa -in "$1" -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    handle_openssl_exit $? "public key to DER"
+    cp "$OPENSSL_OUT" "$OPENSSL_IN"
+    pwncheck "`pkey_hex_digest "$OPENSSL_IN"`" "$2"
+}
+
 # account key handling
 
 load_account_key(){
@@ -406,6 +441,13 @@ load_account_key(){
     ACCOUNT_JWK='{"e":"'"`key_get_exponent $ACCOUNT_KEY`"'","kty":"RSA","n":"'"`key_get_modulus $ACCOUNT_KEY`"'"}'
     REQ_JWKS='{"alg":"RS256","jwk":'"$ACCOUNT_JWK"'}'
     ACCOUNT_THUMB="`echo "$ACCOUNT_JWK" | tr -d '\r\n' | openssl dgst -sha256 -binary | base64url`"
+
+    if [ "$ACCOUNT_KEY" = "$SERVER_KEY" ] ;then
+       # We should allow revoking with compromised certificate key too
+       pwnedkey_key_check "$ACCOUNT_KEY" "server key"
+    else
+       pwnedkey_key_check "$ACCOUNT_KEY" "account key" || exit
+    fi
 }
 
 get_one_url(){
@@ -814,6 +856,8 @@ gen_csr_with_private_key() {
         > "$TMP_SERVER_CSR" \
         2> "$OPENSSL_ERR"
     handle_openssl_exit $? "creating certificate request"
+
+    pwnedkey_key_check "$SERVER_KEY" "server key" || exit
 }
 
 csr_extract_domains() {
@@ -841,6 +885,8 @@ csr_extract_domains() {
     else
         DOMAINS="$ALTDOMAINS"
     fi
+
+    pwnedkey_req_check "$TMP_SERVER_CSR" "certificate signing request key" || exit
 }
 
 certificate_extract_domains() {
