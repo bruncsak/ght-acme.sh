@@ -111,7 +111,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-03-21"
+VERSION_DATE="2020-03-22"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -693,7 +693,10 @@ push_domain_response() {
     if [ "$CHALLENGE_TYPE" = "http-01" ]; then
         if [ -n "$WEBDIR" ]; then
             TOKEN_DIR="`printf "%s" $WEBDIR | sed -e 's/\$DOMAIN/'"$DOMAIN"'/g; s/${DOMAIN}/'"$DOMAIN"'/g'`"
+            SAVED_UMASK="`umask`"
+            umask 0022
             printf "%s\n" "$DOMAIN_TOKEN.$ACCOUNT_THUMB" > "$TOKEN_DIR/$DOMAIN_TOKEN" || exit 1
+            umask "$SAVED_UMASK"
         elif [ -n "$PUSH_TOKEN" ]; then
             $PUSH_TOKEN install "$DOMAIN" "$DOMAIN_TOKEN" "$ACCOUNT_THUMB" || die "could not install token for $DOMAIN"
         fi
