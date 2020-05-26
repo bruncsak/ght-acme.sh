@@ -2,6 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
+#    Copyright (C) 2016-2020 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -111,7 +112,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-03-22"
+VERSION_DATE="2020-05-26"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -286,6 +287,10 @@ fetch_location() {
 
 extract_nonce() {
     header_field_value Replay-Nonce
+}
+
+retry_after() {
+    header_field_value Retry-After
 }
 
 # generate the PROTECTED variable, which contains a nonce retrieved from the
@@ -750,6 +755,7 @@ request_domain_verification() {
     log request verification of $DOMAIN
 
     send_req $DOMAIN_URI '{}'
+    # log "Retry-After value in request_domain_verification: `retry_after`"
 
     if check_http_status 200; then
         return
@@ -797,6 +803,7 @@ check_verification() {
             log check verification of $DOMAIN
 
             send_req "$DOMAIN_AUTHZ" ""
+            # log "Retry-After value in check_verification: `retry_after`"
         
             if check_http_status 200; then
                 DOMAIN_STATUS="`domain_status`"
@@ -1212,7 +1219,8 @@ case "$ACTION" in
         [ "$#" -eq 0 ] || die "no domains needed"
 
         # load domains from csr
-        cat "$SERVER_CSR" > "$TMP_SERVER_CSR" || die "could not copy csr"
+        openssl req -in "$SERVER_CSR" > "$TMP_SERVER_CSR" 2> "$OPENSSL_ERR"
+        handle_openssl_exit "$?" "copying csr"
         csr_extract_domains
         ;;
 
