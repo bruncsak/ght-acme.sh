@@ -112,7 +112,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-05-26"
+VERSION_DATE="2020-08-15"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -123,7 +123,7 @@ PROGNAME="`basename $0`"
 
 # utility functions
 
-echo 'x\040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
+echo 'x\0040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
 
 HexadecimalStringToOctalEscapeSequence() {
 tr '[A-F]' '[a-f]' "$@" | tr -d '\r\n' |
@@ -145,7 +145,8 @@ s/eo/\\034/g; s/ei/\\035/g; s/fo/\\036/g; s/fi/\\037/g;
 }
 
 hex2bin() {
-echo $ECHOESCFLAG "`HexadecimalStringToOctalEscapeSequence`"
+    xxd -r -p
+    # echo $ECHOESCFLAG "`HexadecimalStringToOctalEscapeSequence`"
 }
 
 base64url() {
