@@ -85,6 +85,12 @@ SERVER_CSR=
 # the location, where the certificate should be stored
 SERVER_CERT=
 
+# the location, where the certificate with the signing certificate(s) should be stored
+SERVER_FULL_CHAIN=
+
+# the location, where the signing certificate(s) should be stored
+SERVER_SIGNING_CHAIN=
+
 # the e-mail address to be used with the account key, only needed if account
 # key is not yet registred
 ACCOUNT_EMAIL=
@@ -112,7 +118,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2020-08-15"
+VERSION_DATE="2021-01-30"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -962,10 +968,13 @@ request_certificate(){
     log request certificate
     send_req "$CERTIFICATE" ""
     if check_http_status 200; then
+        if [ -n "$SERVER_FULL_CHAIN" ] ;then
+            tr -d '\r' < "$RESP_BODY"               | sed -e '/^$/d' > "$SERVER_FULL_CHAIN"
+        fi
         tr -d '\r' < "$RESP_BODY" |
         sed -e '1,/^-----END CERTIFICATE-----$/ !d' | sed -e '/^$/d' > "$SERVER_CERT"
         tr -d '\r' < "$RESP_BODY" |
-        sed -e '1,/^-----END CERTIFICATE-----$/d'   | sed -e '/^$/d' > "$SERVER_CERT"_chain
+        sed -e '1,/^-----END CERTIFICATE-----$/d'   | sed -e '/^$/d' > "$SERVER_SIGNING_CHAIN"
     else
         unhandled_response "retrieveing certificate"
     fi
@@ -1017,8 +1026,8 @@ $PROGNAME delete -a account_key
 $PROGNAME clrpenda -a account_key
 $PROGNAME thumbprint -a account_key
 $PROGNAME revoke {-a account_key|-k server_key} -c signed_crt
-$PROGNAME sign -a account_key -k server_key -c signed_crt domain ...
-$PROGNAME sign -a account_key -r server_csr -c signed_crt
+$PROGNAME sign -a account_key -k server_key (chain_options) -c signed_crt domain ...
+$PROGNAME sign -a account_key -r server_csr (chain_options) -c signed_crt
 
     -a account_key    the private key
     -e email          the email address assigned to the account key during
@@ -1028,6 +1037,13 @@ $PROGNAME sign -a account_key -r server_csr -c signed_crt
                       domains, use e.g. gen-csr.sh to create one
     -c signed_crt     the location where to store the signed certificate
                       or retrieve for revocation
+
+  Chain options for sign operation:
+    -s signing_crt    the location, where the intermediate signing
+                      certificate(s) should be stored
+                      default location: {signed_crt}_chain
+    -f full_chain     the location, where the signed certificate with the
+                      intermediate signing certificate(s) should be stored
 
   ACME server options:
     -D URL            ACME server directory URL
@@ -1115,7 +1131,7 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     sign)
-        while getopts :hqD:46Ca:k:r:c:w:P:l: name; do case "$name" in
+        while getopts :hqD:46Ca:k:r:f:s:c:w:P:l: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
             D) CADIR="$OPTARG";;
@@ -1139,6 +1155,8 @@ case "$ACTION" in
                 SERVER_CSR="$OPTARG"
                 ACTION=sign-csr
                 ;;
+            f) SERVER_FULL_CHAIN="$OPTARG";;
+            s) SERVER_SIGNING_CHAIN="$OPTARG";;
             c) SERVER_CERT="$OPTARG";;
             w) WEBDIR="$OPTARG";;
             P) PUSH_TOKEN="$OPTARG";;
@@ -1241,6 +1259,10 @@ fi
 
 [ -z "$PUSH_TOKEN" ] && [ -n "$PUSH_TOKEN_COMMIT" ] &&
     die "commit feature without command to install the token makes no sense" 1
+
+if [ -z "$SERVER_SIGNING_CHAIN" ] ;then
+    SERVER_SIGNING_CHAIN="$SERVER_CERT"_chain
+fi
 
 while [ "$#" -gt 0 ]; do
     DOMAIN="$1"
