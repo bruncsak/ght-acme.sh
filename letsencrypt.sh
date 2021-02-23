@@ -91,6 +91,9 @@ SERVER_FULL_CHAIN=
 # the location, where the signing certificate(s) should be stored
 SERVER_SIGNING_CHAIN=
 
+# selection of the signing chain
+SIGNING_CHAIN_SELECTION=0
+
 # the e-mail address to be used with the account key, only needed if account
 # key is not yet registred
 ACCOUNT_EMAIL=
@@ -118,7 +121,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-01-30"
+VERSION_DATE="2021-02-23"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -284,6 +287,10 @@ header_field_value() {
 
 fetch_next_link() {
     header_field_value Link ';rel="next"' | sed -s 's/^.*<\(.*\)>.*$/\1/'
+}
+
+fetch_alternate_link() {
+    header_field_value Link ';rel="alternate"' | sed -s 's/^.*<\(.*\)>.*$/\1/'
 }
 
 fetch_location() {
@@ -966,18 +973,30 @@ request_certificate(){
         fi
     done
     log request certificate
-    send_req "$CERTIFICATE" ""
-    if check_http_status 200; then
-        if [ -n "$SERVER_FULL_CHAIN" ] ;then
-            tr -d '\r' < "$RESP_BODY"               | sed -e '/^$/d' > "$SERVER_FULL_CHAIN"
+    CUR_CHAIN=0
+    while [ -n "$CERTIFICATE" ] ;do
+        send_req "$CERTIFICATE" ""
+        if check_http_status 200; then
+            if [ "$CUR_CHAIN" = "$SIGNING_CHAIN_SELECTION" ] ;then
+                if [ -n "$SERVER_FULL_CHAIN" ] ;then
+                    tr -d '\r' < "$RESP_BODY"               | sed -e '/^$/d' > "$SERVER_FULL_CHAIN"
+                fi
+                tr -d '\r' < "$RESP_BODY" |
+                sed -e '1,/^-----END CERTIFICATE-----$/ !d' | sed -e '/^$/d' > "$SERVER_CERT"
+                tr -d '\r' < "$RESP_BODY" |
+                sed -e '1,/^-----END CERTIFICATE-----$/d'   | sed -e '/^$/d' > "$SERVER_SIGNING_CHAIN"
+                break
+            else
+                CERTIFICATE="`fetch_alternate_link`"
+                CUR_CHAIN="`expr $CUR_CHAIN + 1`"
+                if [ -z "$CERTIFICATE" ] ;then
+                    die "No such alternate chain: $SIGNING_CHAIN_SELECTION" 1
+                fi
+            fi
+        else
+            unhandled_response "retrieveing certificate"
         fi
-        tr -d '\r' < "$RESP_BODY" |
-        sed -e '1,/^-----END CERTIFICATE-----$/ !d' | sed -e '/^$/d' > "$SERVER_CERT"
-        tr -d '\r' < "$RESP_BODY" |
-        sed -e '1,/^-----END CERTIFICATE-----$/d'   | sed -e '/^$/d' > "$SERVER_SIGNING_CHAIN"
-    else
-        unhandled_response "retrieveing certificate"
-    fi
+    done
 }
 
 old_cert() {
@@ -1038,7 +1057,8 @@ $PROGNAME sign -a account_key -r server_csr (chain_options) -c signed_crt
     -c signed_crt     the location where to store the signed certificate
                       or retrieve for revocation
 
-  Chain options for sign operation:
+  Options for sign operation:
+    -t selection      signing chain selection (number only, default: 0)
     -s signing_crt    the location, where the intermediate signing
                       certificate(s) should be stored
                       default location: {signed_crt}_chain
@@ -1131,7 +1151,7 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     sign)
-        while getopts :hqD:46Ca:k:r:f:s:c:w:P:l: name; do case "$name" in
+        while getopts :hqD:46Ca:k:r:f:s:c:w:P:l:t: name; do case "$name" in
             h) usage; exit 1;;
             q) QUIET=1;;
             D) CADIR="$OPTARG";;
@@ -1161,6 +1181,7 @@ case "$ACTION" in
             w) WEBDIR="$OPTARG";;
             P) PUSH_TOKEN="$OPTARG";;
             l) CHALLENGE_TYPE="$OPTARG";;
+            t) SIGNING_CHAIN_SELECTION="$OPTARG";;
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     -h|--help|-?)
@@ -1184,6 +1205,9 @@ case "$CHALLENGE_TYPE" in
     echo "unsupported challenge type: $CHALLENGE_TYPE" >& 2; exit 1
     ;;
 esac
+
+printf '%s\n' "$SIGNING_CHAIN_SELECTION" | egrep -s -q -e '^[0-9]+$' ||
+    die "Unsupported signing chain selection" 1
 
 case "$ACTION" in
     clrpenda)
