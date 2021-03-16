@@ -2,7 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
-#    Copyright (C) 2016-2020 Attila Bruncsak
+#    Copyright (C) 2016-2021 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -17,27 +17,6 @@
 #    You should have received a copy of the GNU General Public License along
 #    with this program; if not, write to the Free Software Foundation, Inc.,
 #    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
-# temporary files to store input/output of curl or openssl
-
-trap 'rm -f "$RESP_HEABOD" "$WGET_OUT" "$RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 1 2 3 13 15
-
-# file to store header and body of http response
-RESP_HEABOD="`mktemp -t le.$$.resp-heabod.XXXXXX`"
-# file to store the output of the wget
-WGET_OUT="`mktemp -t le.$$.resp-out.XXXXXX`"
-# file to store header of http request
-RESP_HEADER="`mktemp -t le.$$.resp-header.XXXXXX`"
-# file to store body of http request
-RESP_BODY="`mktemp -t le.$$.resp-body.XXXXXX`"
-# tmp config for openssl for addional domains
-OPENSSL_CONFIG="`mktemp -t le.$$.openssl.cnf.XXXXXX`"
-# file to store openssl output
-OPENSSL_IN="`mktemp -t le.$$.openssl.in.XXXXXX`"
-OPENSSL_OUT="`mktemp -t le.$$.openssl.out.XXXXXX`"
-OPENSSL_ERR="`mktemp -t le.$$.openssl.err.XXXXXX`"
-# file to store the CSR
-TMP_SERVER_CSR="`mktemp -t le.$$.server.csr.XXXXXX`"
 
 CADIR="https://api.test4.buypass.no/acme/directory"
 CADIR="https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -121,18 +100,14 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-02-23"
+VERSION_DATE="2021-03-16"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
 
 QUIET=
 
-PROGNAME="`basename $0`"
-
 # utility functions
-
-echo 'x\0040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
 
 HexadecimalStringToOctalEscapeSequence() {
 tr '[A-F]' '[a-f]' "$@" | tr -d '\r\n' |
@@ -173,6 +148,19 @@ die() {
     [ -n "$2" ] && RETCODE="$2"
     [ -n "$1" ] && printf "%s\n" "$1" >& 2
     exit "$RETCODE"
+}
+
+required_commands() {
+    REQUIRED_COMMANDS="basename cat cp rm sed grep egrep fgrep tr mktemp expr tail xxd openssl"
+
+    if [ "$USE_WGET" = yes ] ;then
+        REQUIRED_COMMANDS="$REQUIRED_COMMANDS wget"
+    else
+        REQUIRED_COMMANDS="$REQUIRED_COMMANDS curl"
+    fi
+    for command in $REQUIRED_COMMANDS ;do
+        command -v $command > /dev/null || die "The command '$command' is required to run $PROGNAME"
+    done
 }
 
 validate_domain() {
@@ -1086,6 +1074,35 @@ $PROGNAME sign -a account_key -r server_csr (chain_options) -c signed_crt
   clrpenda:           clear pending authorizations for the given account
 EOT
 }
+
+# Here starts the program
+
+PROGNAME="`basename $0`"
+
+required_commands
+
+# temporary files to store input/output of curl or openssl
+
+trap 'rm -f "$RESP_HEABOD" "$WGET_OUT" "$RESP_HEADER" "$RESP_BODY" "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 1 2 3 13 15
+
+# file to store header and body of http response
+RESP_HEABOD="`mktemp -t le.$$.resp-heabod.XXXXXX`"
+# file to store the output of the wget
+WGET_OUT="`mktemp -t le.$$.resp-out.XXXXXX`"
+# file to store header of http request
+RESP_HEADER="`mktemp -t le.$$.resp-header.XXXXXX`"
+# file to store body of http request
+RESP_BODY="`mktemp -t le.$$.resp-body.XXXXXX`"
+# tmp config for openssl for addional domains
+OPENSSL_CONFIG="`mktemp -t le.$$.openssl.cnf.XXXXXX`"
+# file to store openssl output
+OPENSSL_IN="`mktemp -t le.$$.openssl.in.XXXXXX`"
+OPENSSL_OUT="`mktemp -t le.$$.openssl.out.XXXXXX`"
+OPENSSL_ERR="`mktemp -t le.$$.openssl.err.XXXXXX`"
+# file to store the CSR
+TMP_SERVER_CSR="`mktemp -t le.$$.server.csr.XXXXXX`"
+
+echo 'x\0040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
 
 [ $# -gt 0 ] || die "no action given"
 
