@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-03-16"
+VERSION_DATE="2021-11-12"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -837,6 +837,30 @@ check_verification() {
     domain_commit
 
     $ALL_VALID || exit 1
+
+    log checking order
+    while : ;do
+        send_req "$CURRENT_ORDER" ""
+        if check_http_status 200; then
+            ORDER_STATUS="`order_status`"
+            case "$ORDER_STATUS" in
+                ready)
+                    log order is ready
+                    break
+                    ;;
+                pending)
+                    echo order: "$ORDER_STATUS" >& 2
+                    sleep 1
+                    continue
+                    ;;
+                *)
+                    unhandled_response "checking verification status of order"
+                    ;;
+            esac
+        else
+            unhandled_response "requesting order status verification"
+        fi
+    done
 }
 
 # this function generates the csr from the private server key and list of domains
@@ -953,7 +977,7 @@ request_certificate(){
                     exit 1
                     ;;
                 *)
-                    unhandled_response "checking verification status of order"
+                    unhandled_response "checking finalization status of order"
                     ;;
             esac
         else
