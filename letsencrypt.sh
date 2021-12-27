@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-11-12"
+VERSION_DATE="2021-12-27"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -594,8 +594,12 @@ check_server_domain() {
     die "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN"
 }
 
+authz_status() {
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"status":"\([^"]*\)".*/\1/'
+}
+
 authz_domain() {
-    tr -d ' \r\n' < "$RESP_BODY" | sed -e '/"status":"pending"/ !d; s/.*"identifier":{"type":"dns","value":"\([^"]*\)"}.*/\1/'
+    tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"identifier":{"type":"dns","value":"\([^"]*\)"}.*/\1/'
 }
 
 wildcard_domain() {
@@ -616,14 +620,25 @@ request_challenge_domain(){
 
     if check_http_status 200; then
         DOMAIN="`authz_domain`"
-        if [ -n "$DOMAIN" ] ;then
-            check_server_domain "$DOMAIN" "`wildcard_domain`"
-            DOMAIN_TOKEN="`authz_domain_token`"
-            DOMAIN_URI="`authz_domain_uri`"
-
-            DOMAIN_DATA="$DOMAIN_DATA $DOMAIN $DOMAIN_URI $DOMAIN_TOKEN $DOMAIN_AUTHZ"
-            log "retrieve challenge for $DOMAIN"
-        fi
+        AUTHZ_STATUS="`authz_status`"
+        case "$AUTHZ_STATUS" in
+            valid)
+                log authorization is valid for domain "$DOMAIN"
+                break
+                ;;
+            pending)
+                check_server_domain "$DOMAIN" "`wildcard_domain`"
+                DOMAIN_TOKEN="`authz_domain_token`"
+                DOMAIN_URI="`authz_domain_uri`"
+                DOMAIN_DATA="$DOMAIN_DATA $DOMAIN $DOMAIN_URI $DOMAIN_TOKEN $DOMAIN_AUTHZ"
+                log "retrieve challenge for $DOMAIN"
+                break
+                ;;
+            *)
+                echo authorization status: "$AUTHZ_STATUS" >& 2
+                unhandled_response "checking authorization status for domain $DOMAIN"
+                ;;
+        esac
     elif check_http_status 400; then
         # account not registred?
         show_error "retrieve challenge for URL: $DOMAIN_AUTHZ"
