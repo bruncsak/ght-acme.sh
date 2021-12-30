@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-12-27"
+VERSION_DATE="2021-12-30"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -553,7 +553,8 @@ clrpenda() {
         send_req "$DOMAIN_AUTHZ" ""
         if check_http_status 200; then
             DOMAIN="`authz_domain`"
-            if [ -n "$DOMAIN" ] ;then
+            AUTHZ_STATUS="`authz_status`"
+            if [ "$AUTHZ_STATUS" = pending ] ;then
                 DOMAIN_URI="`authz_domain_uri`"
                 log "retrieve challenge for $DOMAIN"
                 request_domain_verification
@@ -623,7 +624,7 @@ request_challenge_domain(){
         AUTHZ_STATUS="`authz_status`"
         case "$AUTHZ_STATUS" in
             valid)
-                log authorization is valid for domain "$DOMAIN"
+                log "authorization is valid for $DOMAIN"
                 break
                 ;;
             pending)
