@@ -2,7 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
-#    Copyright (C) 2016-2021 Attila Bruncsak
+#    Copyright (C) 2016-2022 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -80,7 +80,7 @@ ACCOUNT_EMAIL=
 # a list of domains, which should be assigned to the certificate
 DOMAINS=
 
-# a list of domains, challenge uri and token
+# a list of domains, challenge uri, token and authorization uri
 DOMAIN_DATA=
 
 # the directory, where to push the response
@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2021-12-30"
+VERSION_DATE="2022-01-01"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -625,7 +625,6 @@ request_challenge_domain(){
         case "$AUTHZ_STATUS" in
             valid)
                 log "authorization is valid for $DOMAIN"
-                break
                 ;;
             pending)
                 check_server_domain "$DOMAIN" "`wildcard_domain`"
@@ -633,7 +632,6 @@ request_challenge_domain(){
                 DOMAIN_URI="`authz_domain_uri`"
                 DOMAIN_DATA="$DOMAIN_DATA $DOMAIN $DOMAIN_URI $DOMAIN_TOKEN $DOMAIN_AUTHZ"
                 log "retrieve challenge for $DOMAIN"
-                break
                 ;;
             *)
                 echo authorization status: "$AUTHZ_STATUS" >& 2
