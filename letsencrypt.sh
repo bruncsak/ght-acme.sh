@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-03-21"
+VERSION_DATE="2022-05-21"
 
 # The meaningful User-Agent to help finding related log entries in the boulder server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -914,6 +914,10 @@ subject_domain() {
     sed -n '/Subject:/ {s/^.*CN=//; s/[,/ 	].*$//; p}' "$OPENSSL_OUT"
 }
 
+san_domains() {
+    sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"
+}
+
 csr_extract_domains() {
     log "extract domains from certificate signing request"
 
@@ -931,7 +935,7 @@ csr_extract_domains() {
         2> "$OPENSSL_ERR"
     handle_openssl_exit $? "reading certificate signing request"
 
-    ALTDOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
+    ALTDOMAINS="`san_domains`"
     SUBJDOMAIN="`subject_domain`"
 
     if [ "$Subject_commonName_support" = yes ] ;then
@@ -951,7 +955,7 @@ certificate_extract_domains() {
         2> "$OPENSSL_ERR"
     handle_openssl_exit $? "reading certificate"
 
-    DOMAINS="`sed -n '/X509v3 Subject Alternative Name:/ { n; s/^[	 ]*DNS[	 ]*:[	 ]*//; s/[	 ]*,[	 ]*DNS[	 ]*:[	 ]*/ /g; p; q; }' "$OPENSSL_OUT"`"
+    DOMAINS="`san_domains`"
     if [ -z "$DOMAINS" ]; then
         DOMAINS="`subject_domain`"
     fi
