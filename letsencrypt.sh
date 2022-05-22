@@ -50,7 +50,7 @@ ACCOUNT_KEY=
 ACCOUNT_JWK=
 
 # the JSON object to specify the signature format
-REQ_JWKS=
+ACCOUNT_ID=
 
 # the thumbprint is the checksum of the JWK and is used for the challenges
 ACCOUNT_THUMB=
@@ -93,16 +93,16 @@ PUSH_TOKEN=
 # the script to be called to push the response to a remote server needs the commit feature
 PUSH_TOKEN_COMMIT=
 
-# set the option of the preferred IP family for connecting to the boulder server
+# set the option of the preferred IP family for connecting to the ACME server
 IPV_OPTION=
 
 # the challenge type, can be dns-01 or http-01 (default)
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-05-21"
+VERSION_DATE="2022-05-22"
 
-# The meaningful User-Agent to help finding related log entries in the boulder server log
+# The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
 
 QUIET=
@@ -308,20 +308,15 @@ gen_protected(){
         [ -n "$NONCE" ] || die "could not fetch new nonce"
     fi
 
-    if [ -z "$KID" ]; then
-        echo '{"alg":"RS256","jwk":'"$ACCOUNT_JWK"',"nonce":"'"$NONCE"'","url":"'"$1"'"}'
-    else
-        echo '{"alg":"RS256","kid":"'"$KID"'","nonce":"'"$NONCE"'","url":"'"$1"'"}'
-    fi
+    printf '%s' '{"alg":"RS256",'"$ACCOUNT_ID"',"nonce":"'"$NONCE"'","url":"'"$1"'"}'
 }
 
 # generate the signature for the request
 
 gen_signature() {
-    printf "%s" "$PROTECTED.$PAYLOAD" > "$OPENSSL_IN"
-    openssl dgst -sha256 -binary -sign "$ACCOUNT_KEY" < "$OPENSSL_IN" > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    printf '%s' "$1" |
+    openssl dgst -sha256 -binary -sign "$ACCOUNT_KEY" 2> "$OPENSSL_ERR"
     handle_openssl_exit "$?" "signing request"
-    SIGNATURE="`base64url < "$OPENSSL_OUT"`"
 }
 
 # helper functions to create the json web key object
@@ -352,32 +347,39 @@ key_get_exponent(){
 send_req_no_kid(){
     URI="$1"
 
-      PAYLOAD="`         echo "$2" | tr -d '\n\r' | base64url`"
-    PROTECTED="`gen_protected "$URI" | tr -d '\n\r' | base64url`"
-    gen_signature
+    PAYLOAD="`printf '%s' "$2" | base64url`"
+    while : ;do
+        PROTECTED="`gen_protected "$URI" | base64url`"
+        SIGNATURE="`gen_signature $PROTECTED.$PAYLOAD | base64url`"
 
-    DATA='{"protected":"'"$PROTECTED"'","payload":"'"$PAYLOAD"'","signature":"'"$SIGNATURE"'"}'
+        DATA='{"protected":"'"$PROTECTED"'","payload":"'"$PAYLOAD"'","signature":"'"$SIGNATURE"'"}'
 
-    if [ "$USE_WGET" != yes ] ;then
-        curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
-        handle_curl_exit $? "$URI"
-    else
-        wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
-        handle_wget_exit $? "$URI"
-    fi
-    fetch_http_status
+        if [ "$USE_WGET" != yes ] ;then
+            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
+            handle_curl_exit $? "$URI"
+        else
+            wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
+            handle_wget_exit $? "$URI"
+        fi
+        fetch_http_status
 
-    if ! check_http_status 400; then
-        return
-    elif ! fgrep -q 'urn:ietf:params:acme:error:badNonce' "$RESP_BODY" ; then
-        return
-    fi
-    echo "badNonce error: other than extrem load on the boulder server," >& 2
-    echo "this is mostly due to multiple client egress IP addresses," >& 2
-    echo "including working IPv4 and IPv6 addresses on dual family systems." >& 2
-    echo "In that case as a workaround please try to restrict the egress" >& 2
-    echo "IP address with the -4 or -6 command line option on the script." >& 2
-    exit 1
+        if ! check_http_status 400; then
+            return
+        elif ! fgrep -q 'urn:ietf:params:acme:error:badNonce' "$RESP_BODY" ; then
+            return
+        fi
+        if [ -z "$BAD_NONCE_MSG" ] ;then
+            BAD_NONCE_MSG=yes
+            echo "badNonce warning: other than extrem load on the ACME server," >& 2
+            echo "this is mostly due to multiple client egress IP addresses," >& 2
+            echo "including working IPv4 and IPv6 addresses on dual family systems." >& 2
+            echo "In that case as a workaround please try to restrict the egress" >& 2
+            echo "IP address with the -4 or -6 command line option on the script." >& 2
+            echo "This message is just a warning, continuing safely." >& 2
+        fi
+        # Bad nonce condition. Here we do not sleep to be nice, just loop immediately.
+        # The error cannot be on the client side, since it is guaranted that we used the latest available nonce.
+    done
 }
 
 send_req(){
@@ -446,14 +448,16 @@ load_account_key(){
     handle_openssl_exit $? "opening account key"
 
     ACCOUNT_JWK='{"e":"'"`key_get_exponent $ACCOUNT_KEY`"'","kty":"RSA","n":"'"`key_get_modulus $ACCOUNT_KEY`"'"}'
-    REQ_JWKS='{"alg":"RS256","jwk":'"$ACCOUNT_JWK"'}'
-    ACCOUNT_THUMB="`echo "$ACCOUNT_JWK" | tr -d '\r\n' | openssl dgst -sha256 -binary | base64url`"
+    ACCOUNT_ID='"jwk":'"$ACCOUNT_JWK"
+    ACCOUNT_THUMB="`printf '%s' "$ACCOUNT_JWK" | openssl dgst -sha256 -binary | base64url`"
 
-    if [ "$ACCOUNT_KEY" = "$SERVER_KEY" ] ;then
-       # We should allow revoking with compromised certificate key too
-       pwnedkey_key_check "$ACCOUNT_KEY" "server key"
-    else
-       pwnedkey_key_check "$ACCOUNT_KEY" "account key" || exit
+    if [ -z "$1" ] ;then
+        if [ "$ACCOUNT_KEY" = "$SERVER_KEY" ] ;then
+           # We should allow revoking with compromised certificate key too
+           pwnedkey_key_check "$ACCOUNT_KEY" "server key"
+        else
+           pwnedkey_key_check "$ACCOUNT_KEY" "account key" || exit
+        fi
     fi
 }
 
@@ -502,12 +506,14 @@ register_account_key(){
     send_req_no_kid "$NEWACCOUNTURL" "$NEW_REG"
 
     if check_http_status 200; then
-        KID="`fetch_location`"
         [ "$1" = "retrieve_kid" ] || echo "account already registered" >& 2
+        KID="`fetch_location`"
+        ACCOUNT_ID='"kid":"'"$KID"'"'
         ORDERS_URL="`orders_url`"
         return
     elif check_http_status 201; then
         KID="`fetch_location`"
+        ACCOUNT_ID='"kid":"'"$KID"'"'
         ORDERS_URL="`orders_url`"
         return
     elif check_http_status 409; then
@@ -696,7 +702,7 @@ domain_commit() {
 }
 
 domain_dns_challenge() {
-    DNS_CHALLENGE="`printf "%s\n" "$DOMAIN_TOKEN.$ACCOUNT_THUMB" | tr -d '\r\n' | openssl dgst -sha256 -binary | base64url`"
+    DNS_CHALLENGE="`printf '%s' "$DOMAIN_TOKEN.$ACCOUNT_THUMB" | openssl dgst -sha256 -binary | base64url`"
     if [ -n "$PUSH_TOKEN" ]; then
         $PUSH_TOKEN "$1" _acme-challenge."$DOMAIN" "$DNS_CHALLENGE" || die "Could not $1 $CHALLENGE_TYPE type challenge token with value $DNS_CHALLENGE for domain $DOMAIN via $PUSH_TOKEN"
     else
@@ -962,7 +968,7 @@ certificate_extract_domains() {
 }
 
 new_cert() {
-    sed -e 's/-----BEGIN\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/{"csr":"/; s/-----END\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$TMP_SERVER_CSR" | tr -d '\r\n'
+    sed -e 's/-----BEGIN\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/{"csr":"/; s/-----END\( NEW\)\{0,1\} CERTIFICATE REQUEST-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$TMP_SERVER_CSR" | tr -d ' \t\r\n'
 }
 
 order_status() {
@@ -1034,7 +1040,7 @@ request_certificate(){
 }
 
 old_cert() {
-    sed -e 's/-----BEGIN CERTIFICATE-----/{"certificate":"/; s/-----END CERTIFICATE-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$SERVER_CERT" | tr -d '\r\n'
+    sed -e 's/-----BEGIN CERTIFICATE-----/{"certificate":"/; s/-----END CERTIFICATE-----/"}/;s/+/-/g;s!/!_!g;s/=//g' "$SERVER_CERT" | tr -d ' \t\r\n'
 }
 
 revoke_certificate(){
@@ -1295,7 +1301,7 @@ case "$ACTION" in
         exit 0;;
 
     thumbprint)
-        load_account_key
+        load_account_key no_pwnd_check
         printf "account thumbprint: %s\n" "$ACCOUNT_THUMB"
         exit 0;;
 
