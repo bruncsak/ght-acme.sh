@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-05-22"
+VERSION_DATE="2022-06-16"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -220,6 +220,8 @@ handle_curl_exit() {
              7) echo "  failed to connect" >& 2;;
             28) echo "  operation timeout" >& 2;;
             35) echo "  SSL connect error" >& 2;;
+            52) echo "  the server did not reply anything" >& 2;;
+            56) echo "  failure in receiving network data" >& 2;;
         esac
 
         exit 1
