@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-15"
+VERSION_DATE="2022-09-16"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -1359,11 +1359,18 @@ if [ -z "$SERVER_SIGNING_CHAIN" ] ;then
     SERVER_SIGNING_CHAIN="$SERVER_CERT"_chain
 fi
 
-DOMAINS="`printf "%s" "$*" | tr A-Z a-z`"
-for DOMAIN do
+while [ "$#" -gt 0 ]; do
+    DOMAIN="$1"
     validate_domain "$DOMAIN" || die "invalid domain: $DOMAIN"
+    if [[ -n "$DOMAINS" ]] ;then
+        DOMAINS="$DOMAINS $DOMAIN"
+    else
+        DOMAINS="$DOMAIN"
+    fi
     shift
 done
+DOMAINS="`printf "%s" "$DOMAINS" | tr A-Z a-z`"
+
 
 [ "$ACTION" = "sign-key" ] && gen_csr_with_private_key
 
