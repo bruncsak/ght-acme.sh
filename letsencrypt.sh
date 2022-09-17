@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-16"
+VERSION_DATE="2022-09-17"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -108,6 +108,10 @@ USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
 QUIET=
 
 # utility functions
+
+tolower() {
+    printf '%s' "$*" | tr A-Z a-z
+}
 
 HexadecimalStringToOctalEscapeSequence() {
 tr '[A-F]' '[a-f]' "$@" | tr -d '\r\n' |
@@ -199,7 +203,7 @@ handle_wget_exit() {
     elif [ "$WGET_EXIT" -eq 8 -a ! -s "$RESP_HEABOD" ] ;then
         echo "error while making a web request to \"$WGET_URI\"" >& 2
         echo "wget exit status: $WGET_EXIT" >& 2
-        die "Server issued an error response and no error document returned and no --content-on-error flag available. Upgrade your wget or use curl instead."
+        die "Server issued an error response and no error document returned and no --content-on-error flag available. Upgrade your wget or use curl instead." 1
     fi
 
     tr -d '\r' < "$RESP_HEABOD" | sed -e '/^$/,$d' > "$RESP_HEADER"
@@ -466,7 +470,7 @@ load_account_key(){
 get_one_url(){
     if ! egrep -s -q -e '"'"$1"'"' "$RESP_BODY" ;then
         cat "$RESP_BODY" >& 2
-        die "Cannot retrieve URL for $1 ACME protocol function from the directory $CADIR"
+        die "Cannot retrieve URL for $1 ACME protocol function from the directory $CADIR" 1
     fi
     tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"'"$1"'":"\([^"]*\)".*/\1/'
 }
@@ -592,15 +596,16 @@ check_server_domain() {
     else
         SERVER_DOMAIN="$1"
     fi
+    SERVER_DOMAIN_LOWER="`tolower $SERVER_DOMAIN`"
 
     set -- $DOMAINS
 
     for REQ_DOMAIN do
-        if [ "$SERVER_DOMAIN" = "$REQ_DOMAIN" ] ;then
+        if [ "$SERVER_DOMAIN_LOWER" = "`tolower $REQ_DOMAIN`" ] ;then
             return
         fi
     done
-    die "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN"
+    die "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN" 1
 }
 
 authz_status() {
@@ -893,11 +898,13 @@ gen_csr_with_private_key() {
     set -- $DOMAINS
 
     FIRST_DOM="$1"
+    validate_domain "$FIRST_DOM" || die "invalid domain: $FIRST_DOM"
 
     ALT_NAME="subjectAltName=DNS:$1"
     shift
 
     for DOMAIN do
+        validate_domain "$DOMAIN" || die "invalid domain: $DOMAIN"
         ALT_NAME="$ALT_NAME,DNS:$DOMAIN"
     done
 
@@ -1323,6 +1330,8 @@ case "$ACTION" in
         [ -n "$SERVER_CERT" ] || die "no output file given"
 
         [ "$#" -gt 0 ] || die "domains needed"
+        DOMAINS=$*
+        gen_csr_with_private_key
         ;;
 
     sign-csr)
@@ -1358,21 +1367,6 @@ fi
 if [ -z "$SERVER_SIGNING_CHAIN" ] ;then
     SERVER_SIGNING_CHAIN="$SERVER_CERT"_chain
 fi
-
-while [ "$#" -gt 0 ]; do
-    DOMAIN="$1"
-    validate_domain "$DOMAIN" || die "invalid domain: $DOMAIN"
-    if [[ -n "$DOMAINS" ]] ;then
-        DOMAINS="$DOMAINS $DOMAIN"
-    else
-        DOMAINS="$DOMAIN"
-    fi
-    shift
-done
-DOMAINS="`printf "%s" "$DOMAINS" | tr A-Z a-z`"
-
-
-[ "$ACTION" = "sign-key" ] && gen_csr_with_private_key
 
 request_challenge
 push_response
