@@ -173,7 +173,7 @@ validate_domain() {
         return 1
     fi
 
-    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^'"$DOMAIN_EXTRA_PAT"'\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\{0,1\}\.\)\{1,\}[a-zA-Z]\{2,63\}$/_/;'`"
+    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^'"$DOMAIN_EXTRA_PAT"'\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\{0,1\}\.\)\{1,\}\([a-zA-Z]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z]\)\)$/_/;'`"
 
     if [ "$DOMAIN_OUT" = _ ]; then
         return 0
