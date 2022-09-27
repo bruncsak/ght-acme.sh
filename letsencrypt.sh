@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-17"
+VERSION_DATE="2022-09-27"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -145,6 +145,11 @@ log() {
     if [ -z "$QUIET" ]; then
         echo "$@" >& 2
     fi
+}
+
+dbgmsg() {
+  # log "$@"
+  :
 }
 
 die() {
@@ -291,26 +296,84 @@ fetch_location() {
     header_field_value Location
 }
 
-# retrieve the nonce from the response header of the previous request for the forthcomming request
+# retrieve the nonce from the response header of the actual request for the forthcomming POST request
 
 extract_nonce() {
-    header_field_value Replay-Nonce
+    new_nonce="`header_field_value Replay-Nonce`"
+    if [ -n "$new_nonce" ] ;then
+        # Log if we had unnecesseraily multiple nonces, but use always the latest nonce
+        [ -n "$NONCE" ] && log "droping unused nonce: $NONCE"
+        NONCE="$new_nonce"
+        dbgmsg "           new nonce: $NONCE"
+    fi
 }
 
 retry_after() {
     header_field_value Retry-After
 }
 
+sleep_retryafter() {
+    RETRY_AFTER="`retry_after`"
+    if printf '%s' "$RETRY_AFTER" | egrep -s -q -e '^[1-9][0-9]*$' ;then
+        if [ "$RETRY_AFTER" -gt 60 ] ;then
+            RETRY_AFTER=60
+        fi
+        log "sleeping $RETRY_AFTER"
+        sleep $RETRY_AFTER
+        return 0
+    fi
+    return 1
+}
+
+server_overload() {
+    if ! check_http_status 503 ;then
+         return 1
+    elif ! fgrep -q 'urn:ietf:params:acme:error:rateLimited' "$RESP_BODY" ;then
+         return 1
+    fi
+    log "rate limit condition"
+    if ! sleep_retryafter ;then
+        log "Could not retrieve expected Retry-After header field value: $RETRY_AFTER"
+        sleep 1
+    fi
+    return 0
+}
+
+server_request() {
+    dbgmsg "server_request: $1   $2"
+    if [ "$USE_WGET" != yes ] ;then
+        if [ -n "$2" ] ;then
+            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$2" "$1"
+        else
+            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$1"
+        fi
+        handle_curl_exit $? "$1"
+    else
+        if [ -n "$2" ] ;then
+            wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$2" "$1" > "$WGET_OUT" 2>& 1
+        else
+            wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" "$1" > "$WGET_OUT" 2>& 1
+        fi
+        handle_wget_exit $? "$1"
+    fi
+    fetch_http_status
+}
+
+request_acme_server() {
+    while : ;do
+        server_request "$1" "$2"
+        extract_nonce
+        server_overload || return
+    done
+}
+
 # generate the PROTECTED variable, which contains a nonce retrieved from the
 # server in the Replay-Nonce header
 
 gen_protected(){
-    NONCE="`extract_nonce`"
     if [ -z "$NONCE" ]; then
-        # echo fetch new nonce >& 2
+        dbgmsg "fetch new nonce"
         send_get_req "$NEWNONCEURL"
-
-        NONCE="`extract_nonce`"
         [ -n "$NONCE" ] || die "could not fetch new nonce"
     fi
 
@@ -360,14 +423,10 @@ send_req_no_kid(){
 
         DATA='{"protected":"'"$PROTECTED"'","payload":"'"$PAYLOAD"'","signature":"'"$SIGNATURE"'"}'
 
-        if [ "$USE_WGET" != yes ] ;then
-            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$DATA" "$URI"
-            handle_curl_exit $? "$URI"
-        else
-            wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$DATA" "$URI" > "$WGET_OUT" 2>& 1
-            handle_wget_exit $? "$URI"
-        fi
-        fetch_http_status
+        # Use only once a nonce
+        NONCE=""
+
+        request_acme_server "$URI" "$DATA"
 
         if ! check_http_status 400; then
             return
@@ -397,20 +456,11 @@ send_req(){
 }
 
 send_get_req(){
-    GET_URI="$1"
-
-    if [ "$USE_WGET" != yes ] ;then
-        curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$GET_URI"
-        handle_curl_exit $? "$GET_URI"
-    else
-        wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" "$GET_URI" > "$WGET_OUT" 2>& 1
-        handle_wget_exit $? "$GET_URI"
-    fi
-    fetch_http_status
+    request_acme_server "$1"
 }
 
 pwncheck(){
-    send_get_req "https://v1.pwnedkeys.com/$1"
+    server_request "https://v1.pwnedkeys.com/$1"
     if check_http_status 404; then
       log "pwnedkeys.com claims: $2 is not compromised"
       return 0
@@ -704,7 +754,7 @@ domain_commit() {
         $PUSH_TOKEN commit || die "$PUSH_TOKEN could not commit"
         # We cannot know how long the execution of an external command will take.
         # Safer to force fetching a new nonce to avoid fatal badNonce error due to nonce validity timeout.
-        > "$RESP_HEADER"
+        NONCE=""
     fi
 }
 
@@ -1373,7 +1423,7 @@ push_response
 request_verification
 check_verification
 if [ "$ACTION" = "revoke" ] ;then
-  revoke_certificate
+  revoke_certificate || { show_error "revoking certificate via account key" ; exit 1 ; }
 else
   request_certificate
 fi
