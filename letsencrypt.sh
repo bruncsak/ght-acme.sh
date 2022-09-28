@@ -100,12 +100,12 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-27"
+VERSION_DATE="2022-09-28"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
 
-QUIET=
+LOGLEVEL=1
 
 # utility functions
 
@@ -142,14 +142,15 @@ base64url() {
 }
 
 log() {
-    if [ -z "$QUIET" ]; then
+    if [ "$LOGLEVEL" -gt 0 ]; then
         echo "$@" >& 2
     fi
 }
 
 dbgmsg() {
-  # log "$@"
-  :
+    if [ "$LOGLEVEL" -gt 1 ]; then
+        echo "$@" >& 2
+    fi
 }
 
 die() {
@@ -305,6 +306,8 @@ extract_nonce() {
         [ -n "$NONCE" ] && log "droping unused nonce: $NONCE"
         NONCE="$new_nonce"
         dbgmsg "           new nonce: $NONCE"
+    else
+        dbgmsg "no new nonce"
     fi
 }
 
@@ -320,9 +323,10 @@ sleep_retryafter() {
         fi
         log "sleeping $RETRY_AFTER"
         sleep $RETRY_AFTER
-        return 0
+    else
+        log "Could not retrieve expected Retry-After header field value: $RETRY_AFTER"
+        sleep 1
     fi
-    return 1
 }
 
 server_overload() {
@@ -332,10 +336,7 @@ server_overload() {
          return 1
     fi
     log "rate limit condition"
-    if ! sleep_retryafter ;then
-        log "Could not retrieve expected Retry-After header field value: $RETRY_AFTER"
-        sleep 1
-    fi
+    sleep_retryafter
     return 0
 }
 
@@ -834,7 +835,7 @@ request_domain_verification() {
     log request verification of $DOMAIN
 
     send_req $DOMAIN_URI '{}'
-    # log "Retry-After value in request_domain_verification: `retry_after`"
+    dbgmsg "Retry-After value in request_domain_verification: `retry_after`"
 
     if check_http_status 200; then
         return
@@ -882,7 +883,7 @@ check_verification() {
             log check verification of $DOMAIN
 
             send_req "$DOMAIN_AUTHZ" ""
-            # log "Retry-After value in check_verification: `retry_after`"
+            dbgmsg "Retry-After value in check_verification: `retry_after`"
         
             if check_http_status 200; then
                 DOMAIN_STATUS="`domain_status`"
@@ -1172,6 +1173,7 @@ $PROGNAME sign -a account_key -r server_csr (chain_options) -c signed_crt
   generic flags:
     -h                this help page
     -q                quiet operation
+    -v                increase verbosity
 
   revoke and sign:
     -l challenge_type can be http-01 (default) or dns-01
@@ -1224,9 +1226,10 @@ SHOW_THUMBPRINT=0
 
 case "$ACTION" in
     clrpenda)
-        while getopts :hqD:46a: name; do case "$name" in
+        while getopts :hqvD:46a: name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
@@ -1234,9 +1237,10 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     delete)
-        while getopts :hqD:46a: name; do case "$name" in
+        while getopts :hqvD:46a: name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
@@ -1244,9 +1248,10 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     register)
-        while getopts :hqD:46a:e:p name; do case "$name" in
+        while getopts :hqvD:46a:e:p name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
@@ -1256,16 +1261,18 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     thumbprint)
-        while getopts :hqa: name; do case "$name" in
+        while getopts :hqva: name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             a) ACCOUNT_KEY="$OPTARG";;
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     revoke)
-        while getopts :hqD:46Ca:k:c:w:P:l: name; do case "$name" in
+        while getopts :hqvD:46Ca:k:c:w:P:l: name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
@@ -1279,9 +1286,10 @@ case "$ACTION" in
             ?|:) echo "invalid arguments" >& 2; exit 1;;
         esac; done;;
     sign)
-        while getopts :hqD:46Ca:k:r:f:s:c:w:P:l:t: name; do case "$name" in
+        while getopts :hqvD:46Ca:k:r:f:s:c:w:P:l:t: name; do case "$name" in
             h) usage; exit 1;;
-            q) QUIET=1;;
+            q) LOGLEVEL=0;;
+            v) LOGLEVEL="`expr $LOGLEVEL + 1`";;
             D) CADIR="$OPTARG";;
             4) IPV_OPTION="-4";;
             6) IPV_OPTION="-6";;
