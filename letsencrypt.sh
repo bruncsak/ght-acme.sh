@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-28"
+VERSION_DATE="2022-09-29"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -258,6 +258,10 @@ check_http_status() {
     [ "$HTTP_STATUS" = "$1" ]
 }
 
+check_acme_error() {
+    fgrep -q "urn:ietf:params:acme:error:$1" "$RESP_BODY"
+}
+
 unhandled_response() {
     echo "unhandled response while $1" >& 2
     echo >& 2
@@ -330,14 +334,13 @@ sleep_retryafter() {
 }
 
 server_overload() {
-    if ! check_http_status 503 ;then
-         return 1
-    elif ! fgrep -q 'urn:ietf:params:acme:error:rateLimited' "$RESP_BODY" ;then
-         return 1
+    if check_http_status 503 && check_acme_error rateLimited ;then
+        log "busy server rate limit condition"
+        sleep_retryafter
+        return 0
+    else
+        return 1
     fi
-    log "rate limit condition"
-    sleep_retryafter
-    return 0
 }
 
 server_request() {
@@ -431,7 +434,7 @@ send_req_no_kid(){
 
         if ! check_http_status 400; then
             return
-        elif ! fgrep -q 'urn:ietf:params:acme:error:badNonce' "$RESP_BODY" ; then
+        elif ! check_acme_error badNonce ;then
             return
         fi
         if [ -z "$BAD_NONCE_MSG" ] ;then
@@ -1122,7 +1125,7 @@ revoke_certificate(){
     else
         send_req "$REVOKECERTURL" "$OLD_CERT"
         if check_http_status 403 || check_http_status 401; then
-            if fgrep -q 'urn:ietf:params:acme:error:unauthorized' "$RESP_BODY" ; then
+            if check_acme_error unauthorized ;then
                 return 1
             else
                 unhandled_response "revoking certificate"
