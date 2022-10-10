@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-09-29"
+VERSION_DATE="2022-10-10"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -469,7 +469,7 @@ pwncheck(){
       log "pwnedkeys.com claims: $2 is not compromised"
       return 0
     elif check_http_status 200; then
-      log "pwnedkeys.com claims: $2 is compromised, fingerprint: $1"
+      echo "pwnedkeys.com claims: $2 is compromised, fingerprint: $1" >& 2
       return 1
     fi
     unhandled_response "pwncheck"
@@ -482,6 +482,7 @@ pkey_hex_digest(){
 }
 
 pwnedkey_req_check(){
+    [[ "$PWNEDKEY_CHECK" = no ]] && return
     openssl req -in "$1" -noout -pubkey > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
     handle_openssl_exit $? "extracting request public key"
     cp "$OPENSSL_OUT" "$OPENSSL_IN"
@@ -492,6 +493,7 @@ pwnedkey_req_check(){
 }
 
 pwnedkey_key_check(){
+    [[ "$PWNEDKEY_CHECK" = no ]] && return
     openssl rsa -in "$1" -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
     handle_openssl_exit $? "public key to DER"
     cp "$OPENSSL_OUT" "$OPENSSL_IN"
