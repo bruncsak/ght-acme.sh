@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-10-12"
+VERSION_DATE="2022-10-27"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -322,10 +322,12 @@ retry_after() {
 sleep_retryafter() {
     RETRY_AFTER="`retry_after`"
     if printf '%s' "$RETRY_AFTER" | egrep -s -q -e '^[1-9][0-9]*$' ;then
-        if [ "$RETRY_AFTER" -gt 60 ] ;then
-            RETRY_AFTER=60
+        if [ "$RETRY_AFTER" -gt 61 ] ;then
+            log "Too big Retry-After header field value: $RETRY_AFTER"
+            RETRY_AFTER=61
         fi
-        log "sleeping $RETRY_AFTER"
+        [[ "$RETRY_AFTER" -eq 1 ]] && pluriel="" || pluriel="s"
+        log "sleeping $RETRY_AFTER second$pluriel"
         sleep $RETRY_AFTER
     else
         log "Could not retrieve expected Retry-After header field value: $RETRY_AFTER"
