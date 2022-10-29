@@ -2,6 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
+#    Copyright (C) 2022 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -19,7 +20,7 @@
 
 # temporary files to store input/output of curl or openssl
 
-trap 'rm -f "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR"' 0 2 3 9 11 13 15
+trap 'rm -f "$OPENSSL_CONFIG" "$OPENSSL_IN" "$OPENSSL_OUT" "$OPENSSL_ERR" "$TMP_SERVER_CSR"' 0 1 2 3 9 11 13 15
 
 # tmp config for openssl for addional domains
 OPENSSL_CONFIG="`mktemp -t gen-csr.$$.openssl.cnf.XXXXXX`"
@@ -27,6 +28,8 @@ OPENSSL_CONFIG="`mktemp -t gen-csr.$$.openssl.cnf.XXXXXX`"
 OPENSSL_IN="`mktemp -t gen-csr.$$.openssl.in.XXXXXX`"
 OPENSSL_OUT="`mktemp -t gen-csr.$$.openssl.out.XXXXXX`"
 OPENSSL_ERR="`mktemp -t gen-csr.$$.openssl.err.XXXXXX`"
+# file to store the CSR
+TMP_SERVER_CSR="`mktemp -t gen-csr.$$.server.csr.XXXXXX`"
 
 # global variables:
 
@@ -39,12 +42,22 @@ SERVER_CSR=
 # a list of domains, which should be assigned to the certificate
 DOMAINS=
 
-QUIET=
+# no wildcard domain name is permitted by default
+DOMAIN_EXTRA_PAT=
+
+LOGLEVEL=1
 
 # utility functions
 
 base64url() {
     openssl base64 | tr '+/' '-_' | tr -d '\r\n='
+}
+
+err_exit() {
+    RETCODE="$?"
+    [ -n "$2" ] && RETCODE="$2"
+    [ -n "$1" ] && printf "%s\n" "$1" >& 2
+    exit "$RETCODE"
 }
 
 validate_domain() {
@@ -53,7 +66,7 @@ validate_domain() {
         return 1
     fi
 
-    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\?\.\)\+[a-zA-Z]\{2,63\}$/_/;'`"
+    DOMAIN_OUT="`printf "%s\n" "$DOMAIN_IN" | sed -e 's/^...$/!/; s/^.\{254,\}$/!/; s/^'"$DOMAIN_EXTRA_PAT"'\([a-zA-Z0-9]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z0-9]\)\{0,1\}\.\)\{1,\}\([a-zA-Z]\([-a-zA-Z0-9]\{0,61\}[a-zA-Z]\)\)$/_/;'`"
 
     if [ "$DOMAIN_OUT" = _ ]; then
         return 0
@@ -67,16 +80,16 @@ handle_openssl_exit() {
     OPENSSL_ACTION=$2
 
     if [ "$OPENSSL_EXIT" "!=" 0 ]; then
-        echo "error while $OPENSSL_ACTION" > /dev/stderr
-        echo "openssl exit status: $OPENSSL_EXIT" > /dev/stderr
-        cat "$OPENSSL_ERR" > /dev/stderr
+        echo "error while $OPENSSL_ACTION" >& 2
+        echo "openssl exit status: $OPENSSL_EXIT" >& 2
+        cat "$OPENSSL_ERR" >& 2
         exit 1
     fi
 }
 
 log() {
-    if [ -z "$QUIET" ]; then
-        echo "$@" > /dev/stderr
+    if [ "$LOGLEVEL" -gt 0 ]; then
+        echo "$@" >& 2
     fi
 }
 
@@ -87,22 +100,29 @@ gen_csr_with_private_key() {
 
     set -- $DOMAINS
 
+    FIRST_DOM="$1"
+    validate_domain "$FIRST_DOM" || err_exit "invalid domain: $FIRST_DOM"
+
     ALT_NAME="subjectAltName=DNS:$1"
     shift
 
-    while [ -n "$1" ]; do
-        ALT_NAME="$ALT_NAME,DNS:$1"
-        shift
+    for DOMAIN do
+        validate_domain "$DOMAIN" || err_exit "invalid domain: $DOMAIN"
+        ALT_NAME="$ALT_NAME,DNS:$DOMAIN"
     done
 
-    cat /etc/ssl/openssl.cnf > "$OPENSSL_CONFIG"
+    if [ -r /etc/ssl/openssl.cnf ]; then
+        cat /etc/ssl/openssl.cnf > "$OPENSSL_CONFIG"
+    else
+        cat /etc/pki/tls/openssl.cnf > "$OPENSSL_CONFIG"
+    fi
     echo '[SAN]' >> "$OPENSSL_CONFIG"
     echo "$ALT_NAME" >> "$OPENSSL_CONFIG"
 
-    openssl req -new -sha512 -key "$SERVER_KEY" -subj / -reqexts SAN -config $OPENSSL_CONFIG \
-        > "$OPENSSL_OUT" \
+    openssl req -new -sha512 -key "$SERVER_KEY" -subj "/CN=$FIRST_DOM" -reqexts SAN -config $OPENSSL_CONFIG \
+        > "$TMP_SERVER_CSR" \
         2> "$OPENSSL_ERR"
-    handle_openssl_exit $? "creating certifacte request"
+    handle_openssl_exit $? "creating certificate request"
 }
 
 usage() {
@@ -122,7 +142,7 @@ PRINT_THUMB=
 while getopts hqk:R: name; do
     case "$name" in
         h) usage; exit;;
-        q) QUIET=1;;
+        q) LOGLEVEL=0;;
         k) SERVER_KEY="$OPTARG";;
         R) SERVER_CSR="$OPTARG";;
     esac
@@ -131,39 +151,31 @@ done
 shift $(($OPTIND - 1))
 
 if [ -z "$SERVER_KEY" ]; then
-    echo no server key specified > /dev/stderr
+    echo no server key specified >& 2
     exit 1
 fi
 
 if [ '!' -r "$SERVER_KEY" ]; then
-    echo could not read server key > /dev/stderr
+    echo could not read server key >& 2
     exit 1
 fi
 
 if [ -z "$1" ]; then
-    echo "need at least on domain" > /dev/stderr
+    echo "need at least on domain" >& 2
     exit 1
 fi
 
-while [ -n "$1" ]; do
-    DOMAIN="$1"
-    if validate_domain "$DOMAIN"; then true; else
-        echo invalid domain: $DOMAIN > /dev/stderr
-        exit 1
-    fi
-    DOMAINS="$DOMAINS $DOMAIN"
-    shift
-done
-DOMAINS="`printf "%s" "$DOMAINS" | tr A-Z a-z`"
+DOMAIN_EXTRA_PAT='\(\*\.\)\{0,1\}'
+DOMAINS=$*
 
-# CSR will be stored in OPENSSL_OUT
+# CSR will be stored in TMP_SERVER_CSR
 gen_csr_with_private_key
 
 if [ -z "$SERVER_CSR" ]; then
-    cat "$OPENSSL_OUT"
+    cat "$TMP_SERVER_CSR"
 else
-    mv "$OPENSSL_OUT" "$SERVER_CSR"
+    mv "$TMP_SERVER_CSR" "$SERVER_CSR"
     if [ "$?" '!=' 0 ]; then
-        [ -r "$OPENSSL_OUT" ] && cat "$OPENSSL_OUT" > /dev/stderr
+        [ -r "$TMP_SERVER_CSR" ] && cat "$TMP_SERVER_CSR" >& 2
     fi
 fi
