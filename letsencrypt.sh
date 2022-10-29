@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-10-27"
+VERSION_DATE="2022-10-29"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -153,7 +153,7 @@ dbgmsg() {
     fi
 }
 
-die() {
+err_exit() {
     RETCODE="$?"
     [ -n "$2" ] && RETCODE="$2"
     [ -n "$1" ] && printf "%s\n" "$1" >& 2
@@ -169,7 +169,7 @@ required_commands() {
         REQUIRED_COMMANDS="$REQUIRED_COMMANDS curl"
     fi
     for command in $REQUIRED_COMMANDS ;do
-        command -v $command > /dev/null || die "The command '$command' is required to run $PROGNAME"
+        command -v $command > /dev/null || err_exit "The command '$command' is required to run $PROGNAME"
     done
 }
 
@@ -209,7 +209,7 @@ handle_wget_exit() {
     elif [ "$WGET_EXIT" -eq 8 -a ! -s "$RESP_HEABOD" ] ;then
         echo "error while making a web request to \"$WGET_URI\"" >& 2
         echo "wget exit status: $WGET_EXIT" >& 2
-        die "Server issued an error response and no error document returned and no --content-on-error flag available. Upgrade your wget or use curl instead." 1
+        err_exit "Server issued an error response and no error document returned and no --content-on-error flag available. Upgrade your wget or use curl instead." 1
     fi
 
     tr -d '\r' < "$RESP_HEABOD" | sed -e '/^$/,$d' > "$RESP_HEADER"
@@ -380,7 +380,7 @@ gen_protected(){
     if [ -z "$NONCE" ]; then
         dbgmsg "fetch new nonce"
         send_get_req "$NEWNONCEURL"
-        [ -n "$NONCE" ] || die "could not fetch new nonce"
+        [ -n "$NONCE" ] || err_exit "could not fetch new nonce"
     fi
 
     printf '%s' '{"alg":"RS256",'"$ACCOUNT_ID"',"nonce":"'"$NONCE"'","url":"'"$1"'"}'
@@ -505,8 +505,8 @@ pwnedkey_key_check(){
 # account key handling
 
 load_account_key(){
-    [ -n "$ACCOUNT_KEY" ] || die "no account key specified"
-    [ -r "$ACCOUNT_KEY" ] || die "could not read account key"
+    [ -n "$ACCOUNT_KEY" ] || err_exit "no account key specified"
+    [ -r "$ACCOUNT_KEY" ] || err_exit "could not read account key"
 
     openssl rsa -in "$ACCOUNT_KEY" -noout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
     handle_openssl_exit $? "opening account key"
@@ -528,7 +528,7 @@ load_account_key(){
 get_one_url(){
     if ! egrep -s -q -e '"'"$1"'"' "$RESP_BODY" ;then
         cat "$RESP_BODY" >& 2
-        die "Cannot retrieve URL for $1 ACME protocol function from the directory $CADIR" 1
+        err_exit "Cannot retrieve URL for $1 ACME protocol function from the directory $CADIR" 1
     fi
     tr -d ' \r\n' < "$RESP_BODY" | sed -e 's/.*"'"$1"'":"\([^"]*\)".*/\1/'
 }
@@ -570,7 +570,7 @@ register_account_key(){
     send_req_no_kid "$NEWACCOUNTURL" "$NEW_REG"
 
     if check_http_status 200; then
-        [ "$1" = "retrieve_kid" ] || die "account already registered"
+        [ "$1" = "retrieve_kid" ] || err_exit "account already registered"
         KID="`fetch_location`"
         ACCOUNT_ID='"kid":"'"$KID"'"'
         ORDERS_URL="`orders_url`"
@@ -581,7 +581,7 @@ register_account_key(){
         ORDERS_URL="`orders_url`"
         return
     elif check_http_status 409; then
-        [ "$1" = "nodie" ] || die "account already exists"
+        [ "$1" = "nodie" ] || err_exit "account already exists"
     elif check_http_status 400 && check_acme_error accountDoesNotExist ;then
         show_error "fetching account information"
         exit 1
@@ -666,7 +666,7 @@ check_server_domain() {
             return
         fi
     done
-    die "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN" 1
+    err_exit "ACME server requested authorization for a rogue domain: $SERVER_DOMAIN" 1
 }
 
 authz_status() {
@@ -762,7 +762,7 @@ request_challenge(){
 domain_commit() {
     if [ -n "$PUSH_TOKEN" ] && [ -n "$PUSH_TOKEN_COMMIT" ]; then
         log "calling $PUSH_TOKEN commit"
-        $PUSH_TOKEN commit || die "$PUSH_TOKEN could not commit"
+        $PUSH_TOKEN commit || err_exit "$PUSH_TOKEN could not commit"
         # We cannot know how long the execution of an external command will take.
         # Safer to force fetching a new nonce to avoid fatal badNonce error due to nonce validity timeout.
         NONCE=""
@@ -772,10 +772,10 @@ domain_commit() {
 domain_dns_challenge() {
     DNS_CHALLENGE="`printf '%s' "$DOMAIN_TOKEN.$ACCOUNT_THUMB" | openssl dgst -sha256 -binary | base64url`"
     if [ -n "$PUSH_TOKEN" ]; then
-        $PUSH_TOKEN "$1" _acme-challenge."$DOMAIN" "$DNS_CHALLENGE" || die "Could not $1 $CHALLENGE_TYPE type challenge token with value $DNS_CHALLENGE for domain $DOMAIN via $PUSH_TOKEN"
+        $PUSH_TOKEN "$1" _acme-challenge."$DOMAIN" "$DNS_CHALLENGE" || err_exit "Could not $1 $CHALLENGE_TYPE type challenge token with value $DNS_CHALLENGE for domain $DOMAIN via $PUSH_TOKEN"
     else
         printf 'update %s _acme-challenge.%s. 300 IN TXT "%s"\n\n' "$1" "$DOMAIN" "$DNS_CHALLENGE" |
-            nsupdate || die "Could not $1 $CHALLENGE_TYPE type challenge token with value $DNS_CHALLENGE for domain $DOMAIN via nsupdate"
+            nsupdate || err_exit "Could not $1 $CHALLENGE_TYPE type challenge token with value $DNS_CHALLENGE for domain $DOMAIN via nsupdate"
     fi
 }
 
@@ -793,7 +793,7 @@ push_domain_response() {
             printf "%s\n" "$DOMAIN_TOKEN.$ACCOUNT_THUMB" > "$TOKEN_DIR/$DOMAIN_TOKEN" || exit 1
             umask "$SAVED_UMASK"
         elif [ -n "$PUSH_TOKEN" ]; then
-            $PUSH_TOKEN install "$DOMAIN" "$DOMAIN_TOKEN" "$ACCOUNT_THUMB" || die "could not install token for $DOMAIN"
+            $PUSH_TOKEN install "$DOMAIN" "$DOMAIN_TOKEN" "$ACCOUNT_THUMB" || err_exit "could not install token for $DOMAIN"
         fi
     elif [ "$CHALLENGE_TYPE" = "dns-01" ]; then
         domain_dns_challenge "add"
@@ -959,13 +959,13 @@ gen_csr_with_private_key() {
     set -- $DOMAINS
 
     FIRST_DOM="$1"
-    validate_domain "$FIRST_DOM" || die "invalid domain: $FIRST_DOM"
+    validate_domain "$FIRST_DOM" || err_exit "invalid domain: $FIRST_DOM"
 
     ALT_NAME="subjectAltName=DNS:$1"
     shift
 
     for DOMAIN do
-        validate_domain "$DOMAIN" || die "invalid domain: $DOMAIN"
+        validate_domain "$DOMAIN" || err_exit "invalid domain: $DOMAIN"
         ALT_NAME="$ALT_NAME,DNS:$DOMAIN"
     done
 
@@ -976,7 +976,6 @@ gen_csr_with_private_key() {
     fi
     echo '[SAN]' >> "$OPENSSL_CONFIG"
     echo "$ALT_NAME" >> "$OPENSSL_CONFIG"
-
 
     openssl req -new -sha512 -key "$SERVER_KEY" -subj "/CN=$FIRST_DOM" -reqexts SAN -config $OPENSSL_CONFIG \
         > "$TMP_SERVER_CSR" \
@@ -1100,7 +1099,7 @@ request_certificate(){
                 CERTIFICATE="`fetch_alternate_link`"
                 CUR_CHAIN="`expr $CUR_CHAIN + 1`"
                 if [ -z "$CERTIFICATE" ] ;then
-                    die "No such alternate chain: $SIGNING_CHAIN_SELECTION" 1
+                    err_exit "No such alternate chain: $SIGNING_CHAIN_SELECTION" 1
                 fi
             fi
         else
@@ -1227,7 +1226,7 @@ TMP_SERVER_CSR="`mktemp -t le.$$.server.csr.XXXXXX`"
 
 echo 'x\0040x' | egrep -s -q -e 'x x' && ECHOESCFLAG='' || ECHOESCFLAG='-e'
 
-[ $# -gt 0 ] || die "no action given"
+[ $# -gt 0 ] || err_exit "no action given"
 
 ACTION="$1"
 shift
@@ -1335,7 +1334,7 @@ case "$ACTION" in
         exit 1
         ;;
     *)
-        die "invalid action: $ACTION" 1 ;;
+        err_exit "invalid action: $ACTION" 1 ;;
 esac
 
 shift $(($OPTIND - 1))
@@ -1353,7 +1352,7 @@ case "$CHALLENGE_TYPE" in
 esac
 
 printf '%s\n' "$SIGNING_CHAIN_SELECTION" | egrep -s -q -e '^[0-9]+$' ||
-    die "Unsupported signing chain selection" 1
+    err_exit "Unsupported signing chain selection" 1
 
 case "$ACTION" in
     clrpenda)
@@ -1383,31 +1382,31 @@ case "$ACTION" in
         exit 0;;
 
     revoke)
-        [ -n "$SERVER_CERT" ] || die "no certificate file given to revoke"
+        [ -n "$SERVER_CERT" ] || err_exit "no certificate file given to revoke"
         [ -z "$ACCOUNT_KEY" -a -z "$SERVER_KEY" ] && echo "either account key or server key must be given" >& 2 && exit 1
         [ -n "$ACCOUNT_KEY" ] || { log "using server key as account key" ; ACCOUNT_KEY="$SERVER_KEY" ; }
         load_account_key
         revoke_certificate && exit 0
         certificate_extract_domains;;
 
-    sign) die "neither server key nor server csr given" 1 ;;
+    sign) err_exit "neither server key nor server csr given" 1 ;;
 
     sign-key)
         load_account_key
-        [ -r "$SERVER_KEY" ] || die "could not read server key"
-        [ -n "$SERVER_CERT" ] || die "no output file given"
+        [ -r "$SERVER_KEY" ] || err_exit "could not read server key"
+        [ -n "$SERVER_CERT" ] || err_exit "no output file given"
 
-        [ "$#" -gt 0 ] || die "domains needed"
+        [ "$#" -gt 0 ] || err_exit "domains needed"
         DOMAINS=$*
         gen_csr_with_private_key
         ;;
 
     sign-csr)
         load_account_key
-        [ -r "$SERVER_CSR" ] || die "could not read certificate signing request"
-        [ -n "$SERVER_CERT" ] || die "no output file given"
+        [ -r "$SERVER_CSR" ] || err_exit "could not read certificate signing request"
+        [ -n "$SERVER_CERT" ] || err_exit "no output file given"
 
-        [ "$#" -eq 0 ] || die "no domains needed"
+        [ "$#" -eq 0 ] || err_exit "no domains needed"
 
         # load domains from csr
         openssl req -in "$SERVER_CSR" > "$TMP_SERVER_CSR" 2> "$OPENSSL_ERR"
@@ -1416,21 +1415,21 @@ case "$ACTION" in
         ;;
 
     *)
-        die "invalid action: $ACTION" 1 ;;
+        err_exit "invalid action: $ACTION" 1 ;;
 esac
 
 [ -n "$WEBDIR" ] && [ "$CHALLENGE_TYPE" = "dns-01" ] &&
-    die "webdir option and dns-01 challenge type are mutual exclusive" 1
+    err_exit "webdir option and dns-01 challenge type are mutual exclusive" 1
 
 if [ "$CHALLENGE_TYPE" = "http-01" ] ;then
     [ -n "$WEBDIR" ] && [ -n "$PUSH_TOKEN" ] &&
-        die "webdir option and command to install the token are mutual exclusive" 1
+        err_exit "webdir option and command to install the token are mutual exclusive" 1
     [ -z "$WEBDIR" ] && [ -z "$PUSH_TOKEN" ] &&
-        die "either webdir option or command to install the token must be specified" 1
+        err_exit "either webdir option or command to install the token must be specified" 1
 fi
 
 [ -z "$PUSH_TOKEN" ] && [ -n "$PUSH_TOKEN_COMMIT" ] &&
-    die "commit feature without command to install the token makes no sense" 1
+    err_exit "commit feature without command to install the token makes no sense" 1
 
 if [ -z "$SERVER_SIGNING_CHAIN" ] ;then
     SERVER_SIGNING_CHAIN="$SERVER_CERT"_chain
