@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-10-29"
+VERSION_DATE="2022-11-02"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -488,15 +488,20 @@ pwnedkey_req_check(){
     openssl req -in "$1" -noout -pubkey > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
     handle_openssl_exit $? "extracting request public key"
     cp "$OPENSSL_OUT" "$OPENSSL_IN"
-    openssl rsa -in "$OPENSSL_IN" -pubin -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
-    handle_openssl_exit $? "public key to DER"
+    if ! openssl pkey -in "$OPENSSL_IN" -pubin -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR" ;then
+        # On old openssl there is no EC key. There we default to RSA.
+        openssl rsa -in "$OPENSSL_IN" -pubin -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    fi
+    handle_openssl_exit $? "request public key to DER"
     cp "$OPENSSL_OUT" "$OPENSSL_IN"
     pwncheck "`pkey_hex_digest "$OPENSSL_IN"`" "$2"
 }
 
 pwnedkey_key_check(){
     [ "$PWNEDKEY_CHECK" = no ] && return
-    openssl rsa -in "$1" -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    if ! openssl ec -in "$1" -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR" ;then
+        openssl rsa -in "$1" -outform der -pubout > "$OPENSSL_OUT" 2> "$OPENSSL_ERR"
+    fi
     handle_openssl_exit $? "public key to DER"
     cp "$OPENSSL_OUT" "$OPENSSL_IN"
     pwncheck "`pkey_hex_digest "$OPENSSL_IN"`" "$2"
