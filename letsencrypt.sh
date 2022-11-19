@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-11-02"
+VERSION_DATE="2022-11-19"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -1157,6 +1157,7 @@ usage() {
 $PROGNAME register [-p] -a account_key -e email
 $PROGNAME delete -a account_key
 $PROGNAME clrpenda -a account_key
+$PROGNAME accountid -a account_key
 $PROGNAME thumbprint -a account_key
 $PROGNAME revoke {-a account_key|-k server_key} -c signed_crt
 $PROGNAME sign -a account_key -k server_key (chain_options) -c signed_crt domain ...
@@ -1199,6 +1200,7 @@ $PROGNAME sign -a account_key -r server_csr (chain_options) -c signed_crt
     -C                the command to call to install the token on a remote
                       server needs the commit feature
   clrpenda:           clear pending authorizations for the given account
+  accountid:          print account id URI for the given account
 EOT
 }
 
@@ -1239,7 +1241,7 @@ shift
 SHOW_THUMBPRINT=0
 
 case "$ACTION" in
-    clrpenda)
+    clrpenda|accountid)
         while getopts :hqvD:46a: name; do case "$name" in
             h) usage; exit 1;;
             q) LOGLEVEL=0;;
@@ -1360,6 +1362,12 @@ printf '%s\n' "$SIGNING_CHAIN_SELECTION" | egrep -s -q -e '^[0-9]+$' ||
     err_exit "Unsupported signing chain selection" 1
 
 case "$ACTION" in
+    accountid)
+        load_account_key
+        register_account_key retrieve_kid
+        printf "account id URI: %s\n" "$KID"
+        exit;;
+
     clrpenda)
         load_account_key
         register_account_key retrieve_kid
