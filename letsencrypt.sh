@@ -2,7 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
-#    Copyright (C) 2016-2022 Attila Bruncsak
+#    Copyright (C) 2016-2024 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2022-11-19"
+VERSION_DATE="2024-07-09"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -151,6 +151,10 @@ dbgmsg() {
     if [ "$LOGLEVEL" -gt 1 ]; then
         echo "$@" >& 2
     fi
+}
+
+errmsg() {
+        echo "$@" >& 2
 }
 
 err_exit() {
@@ -216,25 +220,52 @@ handle_wget_exit() {
     tr -d '\r' < "$RESP_HEABOD" | sed -e '1,/^$/d' > "$RESP_BODY"
 }
 
-handle_curl_exit() {
+curl_return_text()
+{
     CURL_EXIT="$1"
-    CURL_URI="$2"
-
-    if [ "$CURL_EXIT" "!=" 0 ]; then
-        echo "error while making a web request to \"$CURL_URI\"" >& 2
-        echo "curl exit status: $CURL_EXIT" >& 2
         case "$CURL_EXIT" in
             # see man curl "EXIT CODES"
-             3) echo "  malformed URI" >& 2;;
-             6) echo "  could not resolve host" >& 2;;
-             7) echo "  failed to connect" >& 2;;
-            28) echo "  operation timeout" >& 2;;
-            35) echo "  SSL connect error" >& 2;;
-            52) echo "  the server did not reply anything" >& 2;;
-            56) echo "  failure in receiving network data" >& 2;;
+             3) TXT=", malformed URI" ;;
+             6) TXT=", could not resolve host" ;;
+             7) TXT=", failed to connect" ;;
+            28) TXT=", operation timeout" ;;
+            35) TXT=", SSL connect error" ;;
+            52) TXT=", the server did not reply anything" ;;
+            56) TXT=", failure in receiving network data" ;;
+             *) TXT="" ;;
         esac
+    printf "curl return status: %d%s" "$1" "$TXT"
+}
 
-        exit 1
+curl_loop()
+{
+    CURL_ACTION="$1"; shift
+    loop_count=0
+    pluriel=""
+    while : ;do
+        dbgmsg "About making a web request to \"$CURL_ACTION\""
+        curl "$@"
+        CURL_RETURN_CODE="$?"
+        [[ "$loop_count" -ge 20 ]] && break
+        case "$CURL_RETURN_CODE" in
+            6) ;;
+            7) ;;
+            28) ;;
+            35) ;;
+            52) ;;
+            56) ;;
+            *) break ;;
+        esac
+        (( loop_count += 1 ))
+        dbgmsg "While making a web request to \"$CURL_ACTION\" sleeping $loop_count second$pluriel before retry due to `curl_return_text $CURL_RETURN_CODE`"
+        sleep "$loop_count"
+        pluriel="s"
+    done
+    if [ "$CURL_RETURN_CODE" -ne 0 ] ;then
+        errmsg "While making a web request to \"$CURL_ACTION\" error exiting due to `curl_return_text $CURL_RETURN_CODE` (retry number: $loop_count)"
+        exit "$CURL_RETURN_CODE"
+    else
+        dbgmsg "While making a web request to \"$CURL_ACTION\" continuing due to `curl_return_text $CURL_RETURN_CODE`"
     fi
 }
 
@@ -349,11 +380,10 @@ server_request() {
     dbgmsg "server_request: $1   $2"
     if [ "$USE_WGET" != yes ] ;then
         if [ -n "$2" ] ;then
-            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$2" "$1"
+            curl_loop "$1" $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" -H "Content-type: application/jose+json" -d "$2" "$1"
         else
-            curl $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$1"
+            curl_loop "$1" $CURLEXTRAFLAG -s $IPV_OPTION -A "$USER_AGENT" -D "$RESP_HEADER" -o "$RESP_BODY" "$1"
         fi
-        handle_curl_exit $? "$1"
     else
         if [ -n "$2" ] ;then
             wget $WGETEXTRAFLAG -q $IPV_OPTION -U "$USER_AGENT" --retry-connrefused --save-headers $WGETCOEFLAG -O "$RESP_HEABOD" --header="Content-type: application/jose+json" --post-data="$2" "$1" > "$WGET_OUT" 2>& 1
