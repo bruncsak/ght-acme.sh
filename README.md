@@ -79,3 +79,14 @@ This is done with the same account key the certificate was originally signed:
 Alternatively, it is possible to revoke the certificate with its server key:
 
 `# ./letsencrypt.sh revoke -k server.key -c server.pem`
+
+## Custom push scripts
+
+You may need to use the -P option together with a custom script to set up
+the response to the challenge from letsencrypt.
+This might be because you want to sign the certificate from a different
+server than the one that runs your web site or your DNS, or your DNS
+is managed externally and you need to use a specific API.
+Basic example scripts provided by other users are available in contrib/,
+for example contrib/push-ionos-dns.sh.
+These may be of quite varying quality but should help you get started.
