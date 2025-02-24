@@ -25,13 +25,13 @@ fi
 # This avoids a failure when the entry already exists.
 # Not the most clean way (there is also an edit command
 # that could be used), but this is simplest
-curl -X POST "https://porkbun.com/api/json/v3/dns/deleteByNameType/$DOMAIN/TXT/$SUBDOMAIN" --json @- <<EOF
+curl -X POST "https://api.porkbun.com/api/json/v3/dns/deleteByNameType/$DOMAIN/TXT/$SUBDOMAIN" --json @- <<EOF
 {
 $AUTHDATA
 }
 EOF
 if [ "$1" = "add" ] ; then
-curl -X POST "https://porkbun.com/api/json/v3/dns/create/$DOMAIN" --json @- <<EOF
+curl -X POST "https://api.porkbun.com/api/json/v3/dns/create/$DOMAIN" --json @- <<EOF
 {
 $AUTHDATA,
 "name": "$SUBDOMAIN",
@@ -43,5 +43,5 @@ EOF
 # unfortunately it takes a while before the entry is visible.
 # just wait 10 seconds for now, there are certainly more robust/
 # faster ways
-sleep 10
+sleep 20
 fi
