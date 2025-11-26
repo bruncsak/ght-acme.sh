@@ -246,7 +246,7 @@ curl_loop()
         dbgmsg "About making a web request to \"$CURL_ACTION\""
         curl "$@"
         CURL_RETURN_CODE="$?"
-        [[ "$loop_count" -ge 20 ]] && break
+        [ "$loop_count" -ge 20 ] && break
         case "$CURL_RETURN_CODE" in
             6) ;;
             7) ;;
@@ -256,7 +256,7 @@ curl_loop()
             56) ;;
             *) break ;;
         esac
-        (( loop_count += 1 ))
+        loop_count=$((loop_count + 1 ))
         dbgmsg "While making a web request to \"$CURL_ACTION\" sleeping $loop_count second$pluriel before retry due to `curl_return_text $CURL_RETURN_CODE`"
         sleep "$loop_count"
         pluriel="s"
@@ -357,7 +357,7 @@ sleep_retryafter() {
             log "Too big Retry-After header field value: $RETRY_AFTER"
             RETRY_AFTER=61
         fi
-        [[ "$RETRY_AFTER" -eq 1 ]] && pluriel="" || pluriel="s"
+        [ "$RETRY_AFTER" -eq 1 ] && pluriel="" || pluriel="s"
         log "sleeping $RETRY_AFTER second$pluriel"
         sleep $RETRY_AFTER
     else

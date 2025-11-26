@@ -148,7 +148,7 @@ while getopts hqk:R: name; do
     esac
 done
 
-shift $(($OPTIND - 1))
+shift $((OPTIND - 1))
 
 if [ -z "$SERVER_KEY" ]; then
     echo no server key specified >& 2
