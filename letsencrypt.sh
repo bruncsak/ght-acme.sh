@@ -2,7 +2,7 @@
 
 #    letsencrypt.sh - a simple shell implementation for the acme protocol
 #    Copyright (C) 2015 Gerhard Heift
-#    Copyright (C) 2016-2024 Attila Bruncsak
+#    Copyright (C) 2016-2025 Attila Bruncsak
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -100,7 +100,7 @@ IPV_OPTION=
 CHALLENGE_TYPE="http-01"
 
 # the date of the that version
-VERSION_DATE="2024-07-09"
+VERSION_DATE="2025-12-01"
 
 # The meaningful User-Agent to help finding related log entries in the ACME server log
 USER_AGENT="bruncsak/ght-acme.sh $VERSION_DATE"
@@ -1374,7 +1374,7 @@ case "$ACTION" in
         err_exit "invalid action: $ACTION" 1 ;;
 esac
 
-shift $(($OPTIND - 1))
+shift $((OPTIND - 1))
 
 case "$CHALLENGE_TYPE" in
   http-01)
